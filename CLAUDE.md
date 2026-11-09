@@ -13,7 +13,7 @@ NestJS 12 (TypeScript, **ESM**) REST API for NuMo. Local-only for now. Setup and
 
 - **Yarn 4 only** (Corepack, `packageManager`); never npm, never commit `package-lock.json`.
 - Node 26 (`.nvmrc`). Corepack must be installed separately (`npm install -g corepack`).
-- Before handing work over: `yarn lint && yarn typecheck && yarn test` must pass.
+- Before handing work over: `yarn format:check && yarn lint && yarn typecheck && yarn test:cov && yarn build` must pass (same gate as CI; 80% coverage).
 - Never bypass the pre-commit hook (`--no-verify`).
 
 ## ESM
