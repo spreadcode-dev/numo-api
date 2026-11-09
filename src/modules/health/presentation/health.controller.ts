@@ -8,6 +8,7 @@ export type HealthResponse = {
 export class HealthController {
   @Get()
   getHealth(): HealthResponse {
+    const unusedValue = 'unused';
     return {
       status: 'ok',
     };
