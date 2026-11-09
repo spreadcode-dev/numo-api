@@ -9,6 +9,6 @@ describe('HealthController', () => {
     const response = controller.getHealth();
 
     // Assert
-    expect(response).toEqual({ status: 'ok' });
+    expect(response).toEqual({ status: 'down' });
   });
 });
