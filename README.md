@@ -1,5 +1,7 @@
 # numo-api
 
+[![PR Validation](https://github.com/spreadcode-dev/numo-api/actions/workflows/pr-validation.yml/badge.svg)](https://github.com/spreadcode-dev/numo-api/actions/workflows/pr-validation.yml)
+
 NuMo's REST API, built with NestJS (TypeScript, ESM). For now it runs locally only.
 
 ## Prerequisites
@@ -30,14 +32,55 @@ Environment variables are listed in [`.env.example`](.env.example). The app read
 
 ## Quality checks
 
-| Command          | What it does                                      |
-| ---------------- | ------------------------------------------------- |
-| `yarn test`      | Unit tests (Vitest, `*.spec.ts` next to the code) |
-| `yarn test:cov`  | Unit tests with a coverage report in `coverage/`  |
-| `yarn lint`      | Oxlint; fails on any error or warning             |
-| `yarn typecheck` | `tsc --noEmit` across the project                 |
-| `yarn format`    | Prettier on the whole repo                        |
-| `yarn build`     | Compiles to `dist/`                               |
+| Command             | What it does                                                         |
+| ------------------- | -------------------------------------------------------------------- |
+| `yarn test`         | Unit tests (Vitest, `*.spec.ts` next to the code)                    |
+| `yarn test:cov`     | Unit tests with coverage in `coverage/`; fails below 80% (see below) |
+| `yarn lint`         | Oxlint; fails on any error or warning                                |
+| `yarn typecheck`    | `tsc --noEmit` across the project                                    |
+| `yarn format`       | Prettier on the whole repo (writes fixes)                            |
+| `yarn format:check` | Prettier on the whole repo (check only, as in CI)                    |
+| `yarn build`        | Compiles to `dist/`                                                  |
+
+The coverage gate (80% of lines, branches, functions and statements) is set in [`vitest.config.ts`](vitest.config.ts), so it fails the same way locally and in CI. Coverage is measured over all of `src/`, except bootstrap/wiring files (`src/main.ts`, `*.module.ts`).
+
+## Continuous integration
+
+Every pull request targeting `main` (or `develop`) runs the **PR Validation** workflow ([`.github/workflows/pr-validation.yml`](.github/workflows/pr-validation.yml)), job `node-ci`, on the Node version from `.nvmrc` and the Yarn version from `packageManager`:
+
+1. `yarn install --immutable`
+2. `yarn format:check`
+3. `yarn lint`
+4. `yarn typecheck`
+5. `yarn test:cov` (80% coverage gate)
+6. `yarn build`
+
+Run the same gate locally before opening a PR:
+
+```bash
+yarn format:check && yarn lint && yarn typecheck && yarn test:cov && yarn build
+```
+
+The HTML coverage report is uploaded as the `coverage-report` artifact of each workflow run (Actions → run → **Artifacts**), also when the coverage gate fails.
+
+The workflow uses a read-only `GITHUB_TOKEN`, pins third-party actions to commit SHAs and cancels outdated runs on the same branch. It needs no secrets.
+
+### Branch protection
+
+`main` requires the `node-ci` check to pass before a PR can be merged. GitHub only offers a check as required after it has run once, so a repository admin sets it once, after the first workflow run:
+
+```bash
+gh api -X PUT repos/spreadcode-dev/numo-api/branches/main/protection --input - <<'JSON'
+{
+  "required_status_checks": { "strict": true, "contexts": ["node-ci"] },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null
+}
+JSON
+```
+
+Check it with `gh api repos/spreadcode-dev/numo-api/branches/main/protection/required_status_checks`.
 
 ## Pre-commit hook
 
