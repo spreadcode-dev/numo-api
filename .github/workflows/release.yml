@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+# Queue instead of cancelling, so every push to main still gets its tag.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The only job with write access. It runs no project code or dependencies,
+    # just Git and jq through the tagging script.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (credentials kept to push the tag)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Tag the commit with its version
+        run: bash .github/scripts/create-release-tag.sh "$(jq -r .version package.json)" "$GITHUB_SHA"
