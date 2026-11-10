@@ -63,14 +63,15 @@ Postgres 17 runs locally in a container ([`docker-compose.yml`](docker-compose.y
 | `docker compose down`    | Removes the container and keeps the data (volume)          |
 | `docker compose down -v` | **Resets everything**: removes the volume and all data     |
 | `yarn db:users`          | Re-runs the users script (idempotent; container must run)  |
+| `yarn db:schema`         | Applies the schema script (idempotent; container must run) |
 
 ### Users (least privilege)
 
-| Role                  | Used by                         | Can                                               |
-| --------------------- | ------------------------------- | ------------------------------------------------- |
-| `numo_superuser`      | Setup and emergencies only      | Everything (owns the container and `numo_db`)     |
-| `numo_migration_user` | Migrations (future)             | DDL on schema `public`                            |
-| `numo_app_user`       | The API at runtime, and only it | `SELECT`, `INSERT`, `UPDATE`; no `DELETE`, no DDL |
+| Role                  | Used by                          | Can                                               |
+| --------------------- | -------------------------------- | ------------------------------------------------- |
+| `numo_superuser`      | Setup and emergencies only       | Everything (owns the container and `numo_db`)     |
+| `numo_migration_user` | Schema script (`yarn db:schema`) | DDL on schema `public`                            |
+| `numo_app_user`       | The API at runtime, and only it  | `SELECT`, `INSERT`, `UPDATE`; no `DELETE`, no DDL |
 
 [`db/users.sql`](db/users.sql) creates the roles and grants. It runs automatically on the container's **first boot** (empty volume) through [`db/init-users.sh`](db/init-users.sh), with passwords from `.env`. After changing the script or a password, run `yarn db:users` (or `docker compose down -v && docker compose up -d` to start from scratch). Tables created by `numo_migration_user` are automatically readable and writable by `numo_app_user` (`ALTER DEFAULT PRIVILEGES FOR ROLE numo_migration_user`).
 
@@ -96,6 +97,20 @@ CREATE TABLE x (id int);                                      -- permission deni
 DROP TABLE smoke_test;
 ```
 
+### Schema
+
+There is no migration tool: [`db/schema.sql`](db/schema.sql) is a single idempotent script (`CREATE ... IF NOT EXISTS`), applied as `numo_migration_user` by [`db/init-schema.sh`](db/init-schema.sh), so `numo_app_user` gets access to new tables through the default privileges above. It runs automatically on the container's first boot, right after the users script. After changing it, or on a volume created before it existed, run:
+
+```bash
+yarn db:schema   # safe to run again: existing objects are skipped ("already exists, skipping")
+```
+
+Later changes go at the end of the script as `ALTER ... IF NOT EXISTS` or guarded `DO $$` blocks, never by editing a `CREATE` that already ran.
+
+| Table   | Columns                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------- |
+| `users` | `id` (uuid), `email` (unique, case-insensitive), `password_hash` (argon2id), `created_at`, `updated_at` |
+
 ### API connection
 
 The API connects only as `DB_APP_USER` through a `pg` pool ([`src/shared/database`](src/shared/database)), closed on shutdown. `GET /health/db` runs `SELECT 1`:
@@ -106,6 +121,24 @@ docker compose stop postgres
 curl -i http://localhost:3000/health/db  # → 503 {"status":"error","database":"down"}; the API keeps running
 docker compose start postgres
 ```
+
+## Registration
+
+`POST /auth/register` creates an account from `{ email, password }`. The email is trimmed and lowercased; the password must be 12–128 characters, with no composition rules (NIST/OWASP), and is stored only as an argon2id hash. Unknown body fields are rejected (global `ValidationPipe` with `whitelist` and `forbidNonWhitelisted`). It needs the schema applied (`yarn db:schema`).
+
+```bash
+curl -i -X POST localhost:3000/auth/register -H 'Content-Type: application/json' \
+  -d '{"email":"Ana@Example.com","password":"correct-horse-battery"}'
+# → 201 {"id":"…","email":"ana@example.com","createdAt":"…","updatedAt":"…"}
+```
+
+| Status | When                                                                      |
+| ------ | ------------------------------------------------------------------------- |
+| `201`  | Account created; the response never includes the password or its hash     |
+| `400`  | Invalid email, password outside 12–128 characters, or an unexpected field |
+| `409`  | The email is already registered (any capitalisation)                      |
+
+To see the stored hash: `docker compose exec postgres psql -U numo_app_user -d numo_db -c 'SELECT email, password_hash FROM users;'` (it starts with `$argon2id$`). `numo_app_user` can't delete rows, so remove test accounts as the superuser: `docker compose exec postgres psql -U numo_superuser -d numo_db -c "DELETE FROM users WHERE email = 'ana@example.com';"`.
 
 ## Quality checks
 
@@ -234,7 +267,8 @@ src/
     <feature>.module.ts
   shared/            # small cross-cutting pieces
     database/        # pg pool (app user), closed on shutdown
-db/                  # Postgres users script and its container init wrapper
+    openapi/         # Swagger setup (/docs)
+db/                  # Postgres users and schema scripts, and their container init wrappers
 ```
 
-Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`).
+Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects and the `UserRepository`/`PasswordHasher` ports in `domain/`, `RegisterUserUseCase` in `application/` (plain class, built by a factory in `auth.module.ts`), the `pg` repository and argon2 hasher in `infrastructure/`, and `POST /auth/register` with its error mapper in `presentation/`.
