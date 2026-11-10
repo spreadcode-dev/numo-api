@@ -29,9 +29,27 @@ docker compose up -d                    # Postgres (see Database below)
 yarn start:dev                          # watch mode on http://localhost:3000
 curl -i http://localhost:3000/health    # → 200 {"status":"ok"}
 curl -i http://localhost:3000/health/db # → 200 {"status":"ok","database":"up"}
+open http://localhost:3000/docs         # API docs (Swagger UI), see API documentation below
 ```
 
 Environment variables are listed in [`.env.example`](.env.example). The app loads `.env` on startup (`@nestjs/config`); variables already set in the process environment win, e.g. `PORT=4000 yarn start:dev`.
+
+## API documentation
+
+Interactive OpenAPI (Swagger) docs are generated from the controllers by [`@nestjs/swagger`](https://docs.nestjs.com/openapi/introduction):
+
+| URL                             | What it is                                                   |
+| ------------------------------- | ------------------------------------------------------------ |
+| http://localhost:3000/docs      | Swagger UI: browse the endpoints and try them ("Try it out") |
+| http://localhost:3000/docs-json | The raw OpenAPI 3 document                                   |
+
+The title is `NuMo API` and the version comes from `package.json`. Set `SWAGGER_ENABLED=false` to turn both URLs off (they answer `404`); any other value, or none, keeps them on.
+
+**Convention for new endpoints:** every endpoint must show up correctly in `/docs` before its PR is merged.
+
+- Describe request and response bodies with classes in `*.dto.ts` files, not `type` aliases. The [CLI plugin](https://docs.nestjs.com/openapi/cli-plugin) (enabled in [`nest-cli.json`](nest-cli.json)) turns their properties into schemas at build time.
+- Add `@nestjs/swagger` decorators only for what the plugin can't infer, mostly error responses (e.g. `@ApiServiceUnavailableResponse` on `GET /health/db`).
+- Reviewers open `/docs` and check the new endpoint.
 
 ## Database
 
