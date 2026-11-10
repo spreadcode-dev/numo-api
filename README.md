@@ -67,12 +67,12 @@ The workflow uses a read-only `GITHUB_TOKEN`, pins third-party actions to commit
 
 ### Branch protection
 
-`main` requires the `node-ci` check to pass before a PR can be merged, and the rule applies to admins too (no bypass). GitHub only offers a check as required after it has run once, so a repository admin sets it once, after the first workflow run:
+`main` requires the `node-ci` and `validate-release-tag` checks to pass before a PR can be merged, and the rule applies to admins too (no bypass). GitHub counts a skipped job as passed, so `validate-release-tag` only blocks release PRs. GitHub only offers a check as required after it has run once, so a repository admin sets it once, after the first workflow run (for `validate-release-tag`, the first release PR):
 
 ```bash
 gh api -X PUT repos/spreadcode-dev/numo-api/branches/main/protection --input - <<'JSON'
 {
-  "required_status_checks": { "strict": true, "contexts": ["node-ci"] },
+  "required_status_checks": { "strict": true, "contexts": ["node-ci", "validate-release-tag"] },
   "enforce_admins": true,
   "required_pull_request_reviews": null,
   "restrictions": null
@@ -86,10 +86,11 @@ Check it with `gh api repos/spreadcode-dev/numo-api/branches/main/protection/req
 
 The same workflow also checks the conventions from [`CLAUDE.md`](CLAUDE.md) on every pull request. The rules live in small Bash scripts in [`.github/scripts/`](.github/scripts/), each tested by a Vitest spec next to it.
 
-| Job               | Rule                                                                                                                                                                            |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `validate-branch` | The source branch is `main`, `develop`, `release/<version>` (e.g. `release/1.2.3`) or `<type>/<issue-number>-<slug>`, lowercase and hyphenated.                                 |
-| `validate-commit` | The PR has **exactly one commit**, and every non-merge commit is titled `#<issue-number>: <description>`. `release/*` → `main` and `main` → `develop` may have several commits. |
+| Job                    | Rule                                                                                                                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate-branch`      | The source branch is `main`, `develop`, `release/<version>` (e.g. `release/1.2.3`) or `<type>/<issue-number>-<slug>`, lowercase and hyphenated.                                 |
+| `validate-commit`      | The PR has **exactly one commit**, and every non-merge commit is titled `#<issue-number>: <description>`. `release/*` → `main` and `main` → `develop` may have several commits. |
+| `validate-release-tag` | Only for `release/*` → `main`: the `version` in `package.json` hasn't been released yet (no `tag_v-<version>.*` tag on GitHub). Skipped for every other PR.                     |
 
 Allowed `<type>` prefixes: `feature`, `bugfix`, `hotfix`, `chore`, and `ai`, `copilot`, `cursor`, `claude`, `codex` for branches created by AI tools.
 
@@ -103,6 +104,21 @@ git push --force-with-lease
 ```
 
 Run a check locally, e.g. `HEAD_REF=my-branch bash .github/scripts/validate-branch.sh`. Making `validate-branch` and `validate-commit` required checks is part of the GitFlow branch protection setup.
+
+## Releases
+
+Every push to `main` is tagged `tag_v-<version>.<build>` by the **Release** workflow ([`.github/workflows/release.yml`](.github/workflows/release.yml)). `<version>` comes from `package.json` and `<build>` is the commit's UTC time as `YYYYMMDDHHMM`, e.g. `tag_v-0.1.0.202611101845`. The build part keeps tags unique even when a hotfix doesn't bump the version. Re-running the workflow for the same commit skips the existing tag. There's no deploy yet: the tag is the release.
+
+To release:
+
+1. Cut `release/x.y.z` from `develop` (from `main` until `develop` exists).
+2. Bump the version on it: `yarn version x.y.z` (or `yarn version patch|minor|major`), then commit `#<issue-number>: Release x.y.z`.
+3. Open a PR into `main`. `validate-release-tag` fails if `x.y.z` was already released.
+4. Merge it with a **merge commit**. The Release workflow tags the merge commit.
+
+For a hotfix, branch `hotfix/<issue-number>-<slug>` from `main`, bump the patch version in the same commit as the fix, and open a PR into `main`.
+
+List releases with `git ls-remote --tags origin 'tag_v-*'`, or check one version locally with `bash .github/scripts/validate-release-tag.sh <version>`.
 
 ## Pre-commit hook
 

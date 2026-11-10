@@ -53,6 +53,21 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash .github/scripts/validate-commit-message.sh
 
+  # Only release PRs into main are checked; every other PR shows it as skipped.
+  validate-release-tag:
+    name: validate-release-tag
+    if: ${{ startsWith(github.head_ref, 'release/') && github.base_ref == 'main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the version hasn't been released yet
+        run: bash .github/scripts/validate-release-tag.sh "$(jq -r .version package.json)"
+
   node-ci:
     name: node-ci
     runs-on: ubuntu-latest
