@@ -8,15 +8,11 @@ import {
   DATABASE_HEALTH_INDICATOR,
   type DatabaseHealthIndicator,
 } from '../application/database-health-indicator.js';
-
-export type HealthResponse = {
-  status: 'ok';
-};
-
-export type DatabaseHealthResponse = {
-  status: 'ok' | 'error';
-  database: 'up' | 'down';
-};
+import { ApiServiceUnavailableResponse } from '@nestjs/swagger';
+import {
+  DatabaseHealthResponseDto,
+  HealthResponseDto,
+} from './health-response.dto.js';
 
 const DATABASE_DOWN_RESPONSE = { status: 'error', database: 'down' } as const;
 
@@ -28,14 +24,15 @@ export class HealthController {
   ) {}
 
   @Get()
-  getHealth(): HealthResponse {
+  getHealth(): HealthResponseDto {
     return {
       status: 'ok',
     };
   }
 
+  @ApiServiceUnavailableResponse({ type: DatabaseHealthResponseDto })
   @Get('db')
-  async getDatabaseHealth(): Promise<DatabaseHealthResponse> {
+  async getDatabaseHealth(): Promise<DatabaseHealthResponseDto> {
     const isDatabaseUp = await this.databaseHealthIndicator.isUp();
     if (!isDatabaseUp) {
       throw new ServiceUnavailableException(DATABASE_DOWN_RESPONSE);
