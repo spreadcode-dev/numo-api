@@ -75,6 +75,11 @@ export class GitFixture {
     this.git('push', '--quiet', 'origin', 'main');
   }
 
+  /** Pushes a local branch, which also updates `origin/<name>` here. */
+  pushBranch(name: string): void {
+    this.git('push', '--quiet', 'origin', name);
+  }
+
   tagOnOrigin(name: string): void {
     this.git('tag', name);
     this.git('push', '--quiet', 'origin', `refs/tags/${name}`);

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Test double for the gh CLI: records every call in $FAKE_GH_LOG (one call per
+# line, arguments separated by "|") and answers `pr list` with $FAKE_GH_OPEN_PR_URL.
+set -euo pipefail
+
+(
+  IFS='|'
+  echo "$*"
+) >>"$FAKE_GH_LOG"
+
+case "${1:-} ${2:-}" in
+  'pr list') printf '%s' "${FAKE_GH_OPEN_PR_URL:-}" ;;
+  'pr create') echo 'https://github.com/spreadcode-dev/numo-api/pull/999' ;;
+esac

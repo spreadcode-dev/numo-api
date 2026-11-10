@@ -111,14 +111,28 @@ Every push to `main` is tagged `tag_v-<version>.<build>` by the **Release** work
 
 To release:
 
-1. Cut `release/x.y.z` from `develop` (from `main` until `develop` exists).
+1. Cut `release/x.y.z` from `develop`.
 2. Bump the version on it: `yarn version x.y.z` (or `yarn version patch|minor|major`), then commit `#<issue-number>: Release x.y.z`.
 3. Open a PR into `main`. `validate-release-tag` fails if `x.y.z` was already released.
 4. Merge it with a **merge commit**. The Release workflow tags the merge commit.
+5. Review and merge the `main` → `develop` sync PR that opens automatically (see below).
 
 For a hotfix, branch `hotfix/<issue-number>-<slug>` from `main`, bump the patch version in the same commit as the fix, and open a PR into `main`.
 
 List releases with `git ls-remote --tags origin 'tag_v-*'`, or check one version locally with `bash .github/scripts/validate-release-tag.sh <version>`.
+
+### main → develop sync
+
+After every push to `main` (release or hotfix), the **Sync main into develop** workflow ([`.github/workflows/sync-main-develop.yml`](.github/workflows/sync-main-develop.yml)) checks whether `develop` is missing commits from `main`. If it is, it opens a PR `Sync Release <version> (main into develop)` and lists the missing commits in the run log. If `develop` is up to date it does nothing, and if a sync PR is already open it doesn't open another: the open PR picks up the new commits. It never pushes to `develop` or merges by itself.
+
+- **Merge the sync PR with a merge commit**, not squash, to keep the release history on `develop`.
+- **No CI runs on it.** PRs opened with the workflow's `GITHUB_TOKEN` don't trigger other workflows, so PR Validation doesn't run. The commits were already validated on their way to `main`, so review it and merge it by hand. If `develop` ever requires status checks, the sync PR can't get them and needs an admin merge (or a PAT/GitHub App, not set up).
+- **Required repo setting:** "Allow GitHub Actions to create and approve pull requests" (Settings → Actions → General); without it `gh pr create` fails. Check it with `gh api repos/spreadcode-dev/numo-api/actions/permissions/workflow` (`can_approve_pull_request_reviews: true`), and enable it with:
+
+```bash
+gh api -X PUT repos/spreadcode-dev/numo-api/actions/permissions/workflow \
+  -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true
+```
 
 ## Pre-commit hook
 
