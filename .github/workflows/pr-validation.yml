@@ -13,6 +13,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate-branch:
+    name: validate-branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Inputs go through env, never ${{ }} inside `run:`: the branch name is
+      # chosen by whoever opens the PR, so interpolating it allows script injection.
+      - name: Check branch name
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: bash .github/scripts/validate-branch.sh
+
+  validate-commit:
+    name: validate-commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_REF: ${{ github.base_ref }}
+      HEAD_REF: ${{ github.head_ref }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Checkout (full history to count the PR's commits)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check commit count
+        run: bash .github/scripts/validate-commit-count.sh
+
+      - name: Check commit messages
+        if: ${{ !cancelled() }}
+        run: bash .github/scripts/validate-commit-message.sh
+
   node-ci:
     name: node-ci
     runs-on: ubuntu-latest
