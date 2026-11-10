@@ -21,6 +21,7 @@
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "typecheck": "tsc --noEmit",
     "db:users": "docker compose exec postgres bash /db/init-users.sh",
+    "db:schema": "docker compose exec postgres bash /db/init-schema.sh",
     "postinstall": "husky"
   },
   "dependencies": {
@@ -29,6 +30,9 @@
     "@nestjs/core": "^12.0.1",
     "@nestjs/platform-express": "^12.0.1",
     "@nestjs/swagger": "^12.1.1",
+    "@node-rs/argon2": "^2.2.2",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
     "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
