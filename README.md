@@ -24,11 +24,70 @@ Check: `node -v` prints `v26.x` and `yarn -v` prints `4.x`. If `yarn -v` prints 
 ## Run
 
 ```bash
-yarn start:dev                       # watch mode on http://localhost:3000
-curl -i http://localhost:3000/health # → 200 {"status":"ok"}
+cp .env.example .env                    # once; then set your own local passwords
+docker compose up -d                    # Postgres (see Database below)
+yarn start:dev                          # watch mode on http://localhost:3000
+curl -i http://localhost:3000/health    # → 200 {"status":"ok"}
+curl -i http://localhost:3000/health/db # → 200 {"status":"ok","database":"up"}
 ```
 
-Environment variables are listed in [`.env.example`](.env.example). The app reads them from the process environment (no `.env` loading yet), e.g. `PORT=4000 yarn start:dev`.
+Environment variables are listed in [`.env.example`](.env.example). The app loads `.env` on startup (`@nestjs/config`); variables already set in the process environment win, e.g. `PORT=4000 yarn start:dev`.
+
+## Database
+
+Postgres 17 runs locally in a container ([`docker-compose.yml`](docker-compose.yml)), with its data in a named volume. It needs Docker running. Docker Compose reads the same `.env` file as the API. Don't use `$` in `.env` values: Docker Compose treats it as a variable reference.
+
+| Command                  | What it does                                               |
+| ------------------------ | ---------------------------------------------------------- |
+| `docker compose up -d`   | Starts Postgres on `localhost:${DB_PORT}` (default `5432`) |
+| `docker compose ps`      | Shows the `postgres` service; wait for `healthy`           |
+| `docker compose stop`    | Stops the container and keeps the data                     |
+| `docker compose down`    | Removes the container and keeps the data (volume)          |
+| `docker compose down -v` | **Resets everything**: removes the volume and all data     |
+| `yarn db:users`          | Re-runs the users script (idempotent; container must run)  |
+
+### Users (least privilege)
+
+| Role                  | Used by                         | Can                                               |
+| --------------------- | ------------------------------- | ------------------------------------------------- |
+| `numo_superuser`      | Setup and emergencies only      | Everything (owns the container and `numo_db`)     |
+| `numo_migration_user` | Migrations (future)             | DDL on schema `public`                            |
+| `numo_app_user`       | The API at runtime, and only it | `SELECT`, `INSERT`, `UPDATE`; no `DELETE`, no DDL |
+
+[`db/users.sql`](db/users.sql) creates the roles and grants. It runs automatically on the container's **first boot** (empty volume) through [`db/init-users.sh`](db/init-users.sh), with passwords from `.env`. After changing the script or a password, run `yarn db:users` (or `docker compose down -v && docker compose up -d` to start from scratch). Tables created by `numo_migration_user` are automatically readable and writable by `numo_app_user` (`ALTER DEFAULT PRIVILEGES FOR ROLE numo_migration_user`).
+
+Connect with `psql` from your machine (e.g. `brew install libpq`); it asks for the password from `.env`:
+
+```bash
+psql -h localhost -U numo_migration_user -d numo_db
+psql -h localhost -U numo_app_user -d numo_db
+docker compose exec postgres psql -U numo_superuser -d numo_db   # superuser, from inside the container
+```
+
+Inside the container, connections from `localhost` are trusted without a password, so only a connection from your machine checks the passwords. In `psql`, `\du` lists the roles and `\l` the databases. To check the privileges by hand:
+
+```sql
+-- as numo_migration_user
+CREATE TABLE smoke_test (id serial PRIMARY KEY, name text);   -- OK
+-- as numo_app_user
+INSERT INTO smoke_test (name) VALUES ('hello');               -- OK
+SELECT * FROM smoke_test;                                     -- OK
+DELETE FROM smoke_test;                                       -- permission denied
+CREATE TABLE x (id int);                                      -- permission denied
+-- as numo_migration_user, to clean up
+DROP TABLE smoke_test;
+```
+
+### API connection
+
+The API connects only as `DB_APP_USER` through a `pg` pool ([`src/shared/database`](src/shared/database)), closed on shutdown. `GET /health/db` runs `SELECT 1`:
+
+```bash
+curl -i http://localhost:3000/health/db  # → 200 {"status":"ok","database":"up"}
+docker compose stop postgres
+curl -i http://localhost:3000/health/db  # → 503 {"status":"error","database":"down"}; the API keeps running
+docker compose start postgres
+```
 
 ## Quality checks
 
@@ -156,6 +215,8 @@ src/
     presentation/    # controllers, request/response DTOs
     <feature>.module.ts
   shared/            # small cross-cutting pieces
+    database/        # pg pool (app user), closed on shutdown
+db/                  # Postgres users script and its container init wrapper
 ```
 
-Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has only `presentation/`).
+Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`).

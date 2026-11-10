@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: numo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${DB_NAME:?set DB_NAME in .env}
+      DB_APP_USER: ${DB_APP_USER:?set DB_APP_USER in .env}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?set DB_APP_PASSWORD in .env}
+      DB_MIGRATION_USER: ${DB_MIGRATION_USER:?set DB_MIGRATION_USER in .env}
+      DB_MIGRATION_PASSWORD: ${DB_MIGRATION_PASSWORD:?set DB_MIGRATION_PASSWORD in .env}
+
+    ports:
+      - '${DB_PORT:-5432}:5432'
+    volumes:
+      - numo-postgres-data:/var/lib/postgresql/data
+      - ./db:/db:ro
+      # Runs only on the first boot (empty volume); re-run later with `yarn db:users`.
+      - ./db/init-users.sh:/docker-entrypoint-initdb.d/10-users.sh:ro
+
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  numo-postgres-data:
