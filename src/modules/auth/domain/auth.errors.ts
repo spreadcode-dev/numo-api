@@ -20,3 +20,24 @@ export class EmailAlreadyRegisteredError extends Error {
     this.name = 'EmailAlreadyRegisteredError';
   }
 }
+
+export class InvalidCredentialsError extends Error {
+  constructor(message: string = 'Invalid email or password') {
+    super(message);
+    this.name = 'InvalidCredentialsError';
+  }
+}
+
+export class InvalidAccessTokenError extends Error {
+  constructor(message: string = 'Invalid access token') {
+    super(message);
+    this.name = 'InvalidAccessTokenError';
+  }
+}
+
+export class UserNotFoundError extends Error {
+  constructor(message: string = 'User not found') {
+    super(message);
+    this.name = 'UserNotFoundError';
+  }
+}

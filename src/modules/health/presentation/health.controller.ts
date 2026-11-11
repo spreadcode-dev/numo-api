@@ -9,6 +9,7 @@ import {
   type DatabaseHealthIndicator,
 } from '../application/database-health-indicator.js';
 import { ApiServiceUnavailableResponse } from '@nestjs/swagger';
+import { Public } from '../../../shared/auth/public.decorator.js';
 import {
   DatabaseHealthResponseDto,
   HealthResponseDto,
@@ -16,6 +17,7 @@ import {
 
 const DATABASE_DOWN_RESPONSE = { status: 'error', database: 'down' } as const;
 
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(

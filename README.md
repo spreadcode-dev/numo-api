@@ -25,6 +25,7 @@ Check: `node -v` prints `v26.x` and `yarn -v` prints `4.x`. If `yarn -v` prints 
 
 ```bash
 cp .env.example .env                    # once; then set your own local passwords
+openssl rand -base64 48                 # once; paste it as JWT_ACCESS_SECRET in .env (the API won't start without it)
 docker compose up -d                    # Postgres (see Database below)
 yarn start:dev                          # watch mode on http://localhost:3000
 curl -i http://localhost:3000/health    # → 200 {"status":"ok"}
@@ -139,6 +140,36 @@ curl -i -X POST localhost:3000/auth/register -H 'Content-Type: application/json'
 | `409`  | The email is already registered (any capitalisation)                      |
 
 To see the stored hash: `docker compose exec postgres psql -U numo_app_user -d numo_db -c 'SELECT email, password_hash FROM users;'` (it starts with `$argon2id$`). `numo_app_user` can't delete rows, so remove test accounts as the superuser: `docker compose exec postgres psql -U numo_superuser -d numo_db -c "DELETE FROM users WHERE email = 'ana@example.com';"`.
+
+## Login
+
+`POST /auth/login` checks `{ email, password }` and returns a short-lived access token (JWT, HS256, signed with `JWT_ACCESS_SECRET`). Send it as `Authorization: Bearer <token>` to protected routes. There are no refresh tokens yet: log in again when it expires.
+
+```bash
+curl -i -X POST localhost:3000/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"ana@example.com","password":"correct-horse-battery"}'
+# → 200 {"accessToken":"eyJ…","tokenType":"Bearer","expiresIn":900}
+
+TOKEN=$(curl -s -X POST localhost:3000/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"ana@example.com","password":"correct-horse-battery"}' | sed -E 's/.*"accessToken":"([^"]+)".*/\1/')
+curl -i localhost:3000/auth/me -H "Authorization: Bearer $TOKEN"
+# → 200 {"id":"…","email":"ana@example.com"}
+```
+
+| Status | When                                                                                                                                    |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `200`  | Login succeeded, or `/auth/me` with a valid token                                                                                       |
+| `400`  | Login: invalid email format or an unexpected field                                                                                      |
+| `401`  | Login: wrong password **or** unknown email (same message, same response time). `/auth/me`: missing, expired, tampered or unsigned token |
+
+The token's payload holds `sub` (the user id), `iss: numo-api`, `aud: numo-web`, `iat` and `exp`. To read it locally: `echo "$TOKEN" | cut -d. -f2 | base64 -d` (add `=` padding if `base64` complains). In `/docs`, log in with "Try it out", click **Authorize** and paste the `accessToken` to call protected routes from the UI.
+
+| Variable            | Required | Default | What it is                                                                                          |
+| ------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------- |
+| `JWT_ACCESS_SECRET` | yes      | none    | Signs the tokens; at least 32 bytes (`openssl rand -base64 48`). The API refuses to start otherwise |
+| `JWT_ACCESS_TTL`    | no       | `15m`   | Token lifetime: a positive number followed by `s`, `m` or `h`                                       |
+
+**Every route needs a token by default.** A global guard (`JwtAuthGuard`) checks all routes; mark a route or a whole controller with `@Public()` (from [`src/shared/auth`](src/shared/auth)) to opt out, as `/health`, `/health/db`, `/auth/register` and `/auth/login` do. Add `@ApiBearerAuth()` to protected routes so `/docs` sends the token.
 
 ## Quality checks
 
@@ -268,7 +299,8 @@ src/
   shared/            # small cross-cutting pieces
     database/        # pg pool (app user), closed on shutdown
     openapi/         # Swagger setup (/docs)
+    auth/            # @Public() decorator (opt out of the global JwtAuthGuard)
 db/                  # Postgres users and schema scripts, and their container init wrappers
 ```
 
-Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects and the `UserRepository`/`PasswordHasher` ports in `domain/`, `RegisterUserUseCase` in `application/` (plain class, built by a factory in `auth.module.ts`), the `pg` repository and argon2 hasher in `infrastructure/`, and `POST /auth/register` with its error mapper in `presentation/`.
+Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase` and `GetCurrentUserUseCase` in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repository, argon2 hasher and JWT adapter in `infrastructure/`; and the controller, error mapper, global `JwtAuthGuard` and `@CurrentUser()` in `presentation/`.

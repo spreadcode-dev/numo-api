@@ -1,8 +1,15 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import {
   EmailAlreadyRegisteredError,
+  InvalidAccessTokenError,
+  InvalidCredentialsError,
   InvalidEmailError,
   InvalidPasswordError,
+  UserNotFoundError,
 } from '../domain/auth.errors.js';
 import { toHttpError } from './auth-error.mapper.js';
 
@@ -29,6 +36,19 @@ describe('toHttpError', () => {
 
     // Assert
     expect(httpError).toBeInstanceOf(BadRequestException);
+  });
+
+  it.each([
+    new InvalidCredentialsError(),
+    new InvalidAccessTokenError(),
+    new UserNotFoundError(),
+  ])('should map $name to 401 with its message', (error) => {
+    // Act
+    const httpError = toHttpError(error);
+
+    // Assert
+    expect(httpError).toBeInstanceOf(UnauthorizedException);
+    expect((httpError as UnauthorizedException).message).toBe(error.message);
   });
 
   it('should pass any other error through unchanged', () => {
