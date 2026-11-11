@@ -22,6 +22,14 @@ const NEW_USER = {
   passwordHash: '$argon2id$hash',
 };
 
+const USER = {
+  id: USER_ROW.id,
+  email: Email.create('ana@example.com'),
+  passwordHash: '$argon2id$hash',
+  createdAt: CREATED_AT,
+  updatedAt: CREATED_AT,
+};
+
 describe('PgUserRepository', () => {
   it('should report that an email exists when a row is found', async () => {
     // Arrange
@@ -57,13 +65,7 @@ describe('PgUserRepository', () => {
     const user = await repository.create(NEW_USER);
 
     // Assert
-    expect(user).toEqual({
-      id: USER_ROW.id,
-      email: NEW_USER.email,
-      passwordHash: '$argon2id$hash',
-      createdAt: CREATED_AT,
-      updatedAt: CREATED_AT,
-    });
+    expect(user).toEqual(USER);
   });
 
   it('should report a duplicate email when the unique index rejects the insert', async () => {
@@ -89,5 +91,58 @@ describe('PgUserRepository', () => {
 
     // Assert
     await expect(create).rejects.toBe(connectionError);
+  });
+
+  it('should find a user by email, ignoring case', async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [USER_ROW] });
+    const repository = new PgUserRepository(poolWithQuery(query));
+
+    // Act
+    const user = await repository.findByEmail(NEW_USER.email);
+
+    // Assert
+    expect(user).toEqual(USER);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('lower(email) = lower($1)'),
+      ['ana@example.com'],
+    );
+  });
+
+  it('should return undefined when no user has that email', async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new PgUserRepository(poolWithQuery(query));
+
+    // Act
+    const user = await repository.findByEmail(NEW_USER.email);
+
+    // Assert
+    expect(user).toBeUndefined();
+  });
+
+  it('should find a user by id', async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [USER_ROW] });
+    const repository = new PgUserRepository(poolWithQuery(query));
+
+    // Act
+    const user = await repository.findById(USER_ROW.id);
+
+    // Assert
+    expect(user).toEqual(USER);
+    expect(query).toHaveBeenCalledWith(expect.any(String), [USER_ROW.id]);
+  });
+
+  it('should return undefined when no user has that id', async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new PgUserRepository(poolWithQuery(query));
+
+    // Act
+    const user = await repository.findById(USER_ROW.id);
+
+    // Assert
+    expect(user).toBeUndefined();
   });
 });

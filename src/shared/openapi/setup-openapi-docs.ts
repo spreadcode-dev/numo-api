@@ -32,6 +32,7 @@ const buildDocumentConfig = (): Omit<OpenAPIObject, 'paths'> => {
     .setTitle(API_TITLE)
     .setDescription(packageInfo.description)
     .setVersion(packageInfo.version)
+    .addBearerAuth()
     .build();
 };
 

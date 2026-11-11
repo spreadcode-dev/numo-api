@@ -84,6 +84,21 @@ describe('setupOpenApiDocs', () => {
     expect(document.info.version).toBe(version);
   });
 
+  it('should offer Bearer token authorization', async () => {
+    // Arrange
+    vi.stubEnv('SWAGGER_ENABLED', 'true');
+
+    // Act
+    const document = await fetchOpenApiDocument();
+
+    // Assert
+    expect(document.components.securitySchemes.bearer).toEqual({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'JWT',
+    });
+  });
+
   it('should serve the docs when SWAGGER_ENABLED is not set', async () => {
     // Arrange
     vi.stubEnv('SWAGGER_ENABLED', undefined);

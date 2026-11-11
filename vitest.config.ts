@@ -15,8 +15,13 @@ export default defineConfig({
       // Without `include`, Vitest only measures files the tests import, so an
       // untested file would never lower the percentage.
       include: ['src/**/*.ts'],
-      // Bootstrap and module wiring hold no logic worth unit-testing.
-      exclude: ['src/main.ts', 'src/**/*.module.ts', 'src/**/*.spec.ts'],
+      // Bootstrap and module wiring hold no logic worth unit-testing; fakes are test code.
+      exclude: [
+        'src/main.ts',
+        'src/**/*.module.ts',
+        'src/**/*.spec.ts',
+        'src/**/*.fake.ts',
+      ],
       reporter: ['text', 'html', 'lcov'],
       // Still write the report when a test fails, so CI can upload it for debugging.
       reportOnFailure: true,
