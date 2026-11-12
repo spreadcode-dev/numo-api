@@ -1,10 +1,8 @@
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import type { GetCurrentUserUseCase } from '../application/get-current-user.use-case.js';
-import type { LoginUseCase } from '../application/login.use-case.js';
 import type { RegisterUserUseCase } from '../application/register-user.use-case.js';
 import {
   EmailAlreadyRegisteredError,
-  InvalidCredentialsError,
   UserNotFoundError,
 } from '../domain/auth.errors.js';
 import { AuthController } from './auth.controller.js';
@@ -21,14 +19,12 @@ const REGISTERED_USER = {
 
 type UseCaseFakes = {
   registerUser?: RegisterUserUseCase['execute'];
-  login?: LoginUseCase['execute'];
   getCurrentUser?: GetCurrentUserUseCase['execute'];
 };
 
 const controllerWith = (fakes: UseCaseFakes) =>
   new AuthController(
     { execute: fakes.registerUser ?? vi.fn() } as RegisterUserUseCase,
-    { execute: fakes.login ?? vi.fn() } as LoginUseCase,
     { execute: fakes.getCurrentUser ?? vi.fn() } as GetCurrentUserUseCase,
   );
 
@@ -58,37 +54,6 @@ describe('AuthController', () => {
 
     // Assert
     await expect(register).rejects.toBeInstanceOf(ConflictException);
-  });
-
-  it('should return a Bearer access token on login', async () => {
-    // Arrange
-    const execute = vi
-      .fn()
-      .mockResolvedValue({ value: 'signed.jwt.token', expiresInSeconds: 900 });
-    const controller = controllerWith({ login: execute });
-
-    // Act
-    const response = await controller.login(REQUEST);
-
-    // Assert
-    expect(response).toEqual({
-      accessToken: 'signed.jwt.token',
-      tokenType: 'Bearer',
-      expiresIn: 900,
-    });
-    expect(execute).toHaveBeenCalledWith(REQUEST);
-  });
-
-  it('should answer 401 when the login credentials are invalid', async () => {
-    // Arrange
-    const execute = vi.fn().mockRejectedValue(new InvalidCredentialsError());
-    const controller = controllerWith({ login: execute });
-
-    // Act
-    const login = controller.login(REQUEST);
-
-    // Assert
-    await expect(login).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('should return the id and email of the current user', async () => {

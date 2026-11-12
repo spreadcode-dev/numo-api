@@ -108,9 +108,10 @@ yarn db:schema   # safe to run again: existing objects are skipped ("already exi
 
 Later changes go at the end of the script as `ALTER ... IF NOT EXISTS` or guarded `DO $$` blocks, never by editing a `CREATE` that already ran.
 
-| Table   | Columns                                                                                                 |
-| ------- | ------------------------------------------------------------------------------------------------------- |
-| `users` | `id` (uuid), `email` (unique, case-insensitive), `password_hash` (argon2id), `created_at`, `updated_at` |
+| Table            | Columns                                                                                                                                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `users`          | `id` (uuid), `email` (unique, case-insensitive), `password_hash` (argon2id), `created_at`, `updated_at`                                                                                                            |
+| `refresh_tokens` | `id` (uuid), `user_id` (→ `users`), `family_id` (one per login), `token_hash` (SHA-256 hex, unique), `expires_at`, `revoked_at` (empty while active), `replaced_by_id` (→ the token that rotated it), `created_at` |
 
 ### API connection
 
@@ -143,7 +144,7 @@ To see the stored hash: `docker compose exec postgres psql -U numo_app_user -d n
 
 ## Login
 
-`POST /auth/login` checks `{ email, password }` and returns a short-lived access token (JWT, HS256, signed with `JWT_ACCESS_SECRET`). Send it as `Authorization: Bearer <token>` to protected routes. There are no refresh tokens yet: log in again when it expires.
+`POST /auth/login` checks `{ email, password }` and returns a short-lived access token (JWT, HS256, signed with `JWT_ACCESS_SECRET`). Send it as `Authorization: Bearer <token>` to protected routes. It also sets a `refresh_token` cookie that renews the session without the password (see [Session: refresh and logout](#session-refresh-and-logout)).
 
 ```bash
 curl -i -X POST localhost:3000/auth/login -H 'Content-Type: application/json' \
@@ -169,7 +170,41 @@ The token's payload holds `sub` (the user id), `iss: numo-api`, `aud: numo-web`,
 | `JWT_ACCESS_SECRET` | yes      | none    | Signs the tokens; at least 32 bytes (`openssl rand -base64 48`). The API refuses to start otherwise |
 | `JWT_ACCESS_TTL`    | no       | `15m`   | Token lifetime: a positive number followed by `s`, `m` or `h`                                       |
 
-**Every route needs a token by default.** A global guard (`JwtAuthGuard`) checks all routes; mark a route or a whole controller with `@Public()` (from [`src/shared/auth`](src/shared/auth)) to opt out, as `/health`, `/health/db`, `/auth/register` and `/auth/login` do. Add `@ApiBearerAuth()` to protected routes so `/docs` sends the token.
+**Every route needs a token by default.** A global guard (`JwtAuthGuard`) checks all routes; mark a route or a whole controller with `@Public()` (from [`src/shared/auth`](src/shared/auth)) to opt out, as `/health`, `/health/db`, `/auth/register`, `/auth/login`, `/auth/refresh` and `/auth/logout` do (the last two are authenticated by their cookie instead). Add `@ApiBearerAuth()` to protected routes so `/docs` sends the token.
+
+## Session: refresh and logout
+
+Login also sets a **refresh token** in a cookie, so the session can be renewed without the password:
+
+- **Opaque and random** (256 bits, base64url), not a JWT. The database stores only its SHA-256 hash (`refresh_tokens.token_hash`), never the value. It expires after **7 days**.
+- **Cookie:** `refresh_token`, with `HttpOnly` (page scripts can't read it), `Secure` and `SameSite=Strict` (browsers treat `localhost` as secure), and `Path=/auth` (sent only to the auth routes).
+- **Rotation:** every `POST /auth/refresh` revokes the presented token and issues a new one in the same _family_ (the chain that started with one login).
+- **Reuse detection:** presenting a token that was already rotated revokes every token in its family and answers `401`. Someone kept a copy, so that session ends everywhere.
+
+```bash
+# Log in and keep the cookie in a jar
+curl -i -c jar.txt -X POST localhost:3000/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"ana@example.com","password":"correct-horse-battery"}'
+# → 200 {"accessToken":"eyJ…",…} + Set-Cookie: refresh_token=…; Path=/auth; HttpOnly; Secure; SameSite=Strict
+
+# Renew: new access token + rotated cookie (-b sends the jar, -c saves the new cookie)
+curl -i -b jar.txt -c jar.txt -X POST localhost:3000/auth/refresh
+# → 200 {"accessToken":"eyJ…",…} + a different refresh_token cookie
+
+# End the session: the token is revoked and the cookie cleared
+curl -i -b jar.txt -c jar.txt -X POST localhost:3000/auth/logout
+# → 204
+```
+
+| Status | `POST /auth/refresh`                                                      | `POST /auth/logout`                                 |
+| ------ | ------------------------------------------------------------------------- | --------------------------------------------------- |
+| `200`  | New access token in the body, rotated cookie                              |                                                     |
+| `204`  |                                                                           | Always: token revoked (if valid) and cookie cleared |
+| `401`  | No cookie, or an unknown, expired, revoked or reused token (same message) |                                                     |
+
+**For clients (`numo-web`):** send refresh calls one at a time. Two parallel refreshes with the same cookie look like token reuse, and the second one ends the session.
+
+Revoked and expired rows stay in `refresh_tokens` (the app user has no `DELETE` grant). A cleanup job is planned separately.
 
 ## Quality checks
 
@@ -303,4 +338,4 @@ src/
 db/                  # Postgres users and schema scripts, and their container init wrappers
 ```
 
-Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase` and `GetCurrentUserUseCase` in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repository, argon2 hasher and JWT adapter in `infrastructure/`; and the controller, error mapper, global `JwtAuthGuard` and `@CurrentUser()` in `presentation/`.
+Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and `@CurrentUser()` in `presentation/`.

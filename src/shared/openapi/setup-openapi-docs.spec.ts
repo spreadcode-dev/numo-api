@@ -135,4 +135,19 @@ describe('setupOpenApiDocs', () => {
     // Assert
     expect(response.status).toBe(200);
   });
+
+  it('should declare the refresh_token cookie as an auth scheme', async () => {
+    // Arrange
+    vi.stubEnv('SWAGGER_ENABLED', 'true');
+
+    // Act
+    const document = await fetchOpenApiDocument();
+
+    // Assert
+    expect(document.components.securitySchemes.cookie).toMatchObject({
+      type: 'apiKey',
+      in: 'cookie',
+      name: 'refresh_token',
+    });
+  });
 });
