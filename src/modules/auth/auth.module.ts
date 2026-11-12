@@ -2,6 +2,7 @@ import { Module, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { GetCurrentUserUseCase } from './application/get-current-user.use-case.js';
 import { LoginUseCase } from './application/login.use-case.js';
 import { LogoutUseCase } from './application/logout.use-case.js';
@@ -43,6 +44,7 @@ import { PgRefreshTokenRepository } from './infrastructure/pg-refresh-token-repo
 import { PgUserRepository } from './infrastructure/pg-user-repository.js';
 import { SystemClock } from './infrastructure/system-clock.js';
 import { AuthController } from './presentation/auth.controller.js';
+import { loadAuthRateLimitOptions } from './presentation/auth-rate-limit.config.js';
 import { JwtAuthGuard } from './presentation/jwt-auth.guard.js';
 import { SessionController } from './presentation/session.controller.js';
 
@@ -59,6 +61,12 @@ const accessTokenConfigProvider: Provider = {
       extraProviders: [accessTokenConfigProvider],
       inject: [ACCESS_TOKEN_CONFIG],
       useFactory: createJwtModuleOptions,
+    }),
+    // In-memory counters: enough for one local instance. Several instances
+    // would need a shared store (e.g. Redis) so they see the same counts.
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: loadAuthRateLimitOptions,
     }),
   ],
   controllers: [AuthController, SessionController],

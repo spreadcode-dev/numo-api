@@ -206,6 +206,27 @@ curl -i -b jar.txt -c jar.txt -X POST localhost:3000/auth/logout
 
 Revoked and expired rows stay in `refresh_tokens` (the app user has no `DELETE` grant). A cleanup job is planned separately.
 
+## Rate limiting
+
+`POST /auth/login` and `POST /auth/register` accept at most **5 requests per minute per IP, per route** (login and registration have separate budgets). The next request gets `429 Too Many Requests` with a `Retry-After` header (seconds until the window frees up). No other route is limited, and accounts are never locked: a lockout would let anyone block a real user by guessing wrong on purpose.
+
+| Variable              | Default | Meaning                                               |
+| --------------------- | ------- | ----------------------------------------------------- |
+| `AUTH_THROTTLE_LIMIT` | `5`     | Requests allowed per IP and route within the window   |
+| `AUTH_THROTTLE_TTL`   | `1m`    | Window length: `<number>` followed by `s`, `m` or `h` |
+
+An invalid value stops the API at startup.
+
+```bash
+for i in $(seq 6); do curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:3000/auth/login \
+  -H 'Content-Type: application/json' -d '{"email":"nobody@example.com","password":"wrong-password-123"}'; done
+# → 401 ×5, then 429 (curl -i shows Retry-After)
+```
+
+Start with `AUTH_THROTTLE_TTL=10s yarn start:dev` to watch the window reset quickly.
+
+Counters live in memory: they reset when the API restarts and are not shared between instances (a shared store such as Redis is needed once several instances run). Behind a reverse proxy every client would share the proxy's IP; Express `trust proxy` must be configured when a hosted environment exists.
+
 ## Quality checks
 
 | Command             | What it does                                                         |
@@ -333,9 +354,10 @@ src/
     <feature>.module.ts
   shared/            # small cross-cutting pieces
     database/        # pg pool (app user), closed on shutdown
+    config/          # env value parsers shared by modules (durations like 15m)
     openapi/         # Swagger setup (/docs)
     auth/            # @Public() decorator (opt out of the global JwtAuthGuard)
 db/                  # Postgres users and schema scripts, and their container init wrappers
 ```
 
-Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and `@CurrentUser()` in `presentation/`.
+Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard`, `@CurrentUser()` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`.
