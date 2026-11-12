@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-export class LoginResponseDto {
+export class AccessTokenResponseDto {
   accessToken: string;
 
   @ApiProperty({ enum: ['Bearer'] })

@@ -9,6 +9,7 @@ import {
   InvalidCredentialsError,
   InvalidEmailError,
   InvalidPasswordError,
+  InvalidRefreshTokenError,
   UserNotFoundError,
 } from '../domain/auth.errors.js';
 import { toHttpError } from './auth-error.mapper.js';
@@ -41,6 +42,7 @@ describe('toHttpError', () => {
   it.each([
     new InvalidCredentialsError(),
     new InvalidAccessTokenError(),
+    new InvalidRefreshTokenError(),
     new UserNotFoundError(),
   ])('should map $name to 401 with its message', (error) => {
     // Act

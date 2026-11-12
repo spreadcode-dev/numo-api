@@ -33,6 +33,7 @@ const buildDocumentConfig = (): Omit<OpenAPIObject, 'paths'> => {
     .setDescription(packageInfo.description)
     .setVersion(packageInfo.version)
     .addBearerAuth()
+    .addCookieAuth('refresh_token')
     .build();
 };
 
