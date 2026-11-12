@@ -23,6 +23,7 @@ import { RefreshSessionUseCase } from '../application/refresh-session.use-case.j
 import type { Session } from '../application/session-issuer.js';
 import { AccessTokenResponseDto } from './access-token.response.dto.js';
 import { toHttpError } from './auth-error.mapper.js';
+import { AuthRateLimited } from './auth-rate-limited.decorator.js';
 import { LoginRequestDto } from './login.request.dto.js';
 import {
   clearRefreshTokenCookie,
@@ -80,6 +81,7 @@ export class SessionController {
     description: 'Invalid email format, or unexpected fields',
   })
   @ApiUnauthorizedResponse({ description: 'Invalid email or password' })
+  @AuthRateLimited()
   @Public()
   @HttpCode(HttpStatus.OK)
   @Post('login')
