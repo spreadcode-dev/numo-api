@@ -177,7 +177,7 @@ The token's payload holds `sub` (the user id), `iss: numo-api`, `aud: numo-web`,
 Login also sets a **refresh token** in a cookie, so the session can be renewed without the password:
 
 - **Opaque and random** (256 bits, base64url), not a JWT. The database stores only its SHA-256 hash (`refresh_tokens.token_hash`), never the value. It expires after **7 days**.
-- **Cookie:** `refresh_token`, with `HttpOnly` (page scripts can't read it), `Secure` and `SameSite=Strict` (browsers treat `localhost` as secure), and `Path=/auth` (sent only to the auth routes).
+- **Cookie:** `refresh_token`, with `HttpOnly` (page scripts can't read it), `Secure` and `SameSite=Strict` (browsers treat `localhost` as secure), and `Path=/auth` (sent only to the auth routes; configurable, see below).
 - **Rotation:** every `POST /auth/refresh` revokes the presented token and issues a new one in the same _family_ (the chain that started with one login).
 - **Reuse detection:** presenting a token that was already rotated revokes every token in its family and answers `401`. Someone kept a copy, so that session ends everywhere.
 
@@ -203,6 +203,21 @@ curl -i -b jar.txt -c jar.txt -X POST localhost:3000/auth/logout
 | `401`  | No cookie, or an unknown, expired, revoked or reused token (same message) |                                                     |
 
 **For clients (`numo-web`):** send refresh calls one at a time. Two parallel refreshes with the same cookie look like token reuse, and the second one ends the session.
+
+**Cookie path.** Browsers only send a cookie to URLs under its `Path`. `numo-web` calls the API through its own origin (a Next.js rewrite from `/api/*` to this API), so the browser sees the auth routes as `/api/auth/...`, and a cookie on `/auth` would never reach `/api/auth/refresh`. Only the cookie's `Path` changes; the routes stay the same.
+
+| Variable                    | Default | Meaning                                                                                                                       |
+| --------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `REFRESH_TOKEN_COOKIE_PATH` | `/auth` | `Path` of the `refresh_token` cookie. Must start with `/`, or the API refuses to start. Set it to `/api/auth` for `numo-web`. |
+
+```bash
+REFRESH_TOKEN_COOKIE_PATH=/api/auth yarn start:dev
+curl -i -X POST localhost:3000/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"ana@example.com","password":"correct-horse-battery"}'
+# → Set-Cookie: refresh_token=…; Path=/api/auth; HttpOnly; Secure; SameSite=Strict
+```
+
+curl's cookie jar follows `Path` like a browser does, so it won't send this cookie to `localhost:3000/auth/refresh`. To try refresh or logout directly, pass the cookie by hand: `-H 'Cookie: refresh_token=…'`.
 
 Revoked and expired rows stay in `refresh_tokens` (the app user has no `DELETE` grant). A cleanup job is planned separately.
 

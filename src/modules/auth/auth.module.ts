@@ -46,6 +46,10 @@ import { SystemClock } from './infrastructure/system-clock.js';
 import { AuthController } from './presentation/auth.controller.js';
 import { loadAuthRateLimitOptions } from './presentation/auth-rate-limit.config.js';
 import { JwtAuthGuard } from './presentation/jwt-auth.guard.js';
+import {
+  loadRefreshTokenCookieOptions,
+  REFRESH_TOKEN_COOKIE_OPTIONS,
+} from './presentation/refresh-token.cookie.js';
 import { SessionController } from './presentation/session.controller.js';
 
 // Loaded once at startup: a missing or short JWT_ACCESS_SECRET stops the app here.
@@ -72,6 +76,12 @@ const accessTokenConfigProvider: Provider = {
   controllers: [AuthController, SessionController],
   providers: [
     accessTokenConfigProvider,
+    // Built once at startup: a REFRESH_TOKEN_COOKIE_PATH not starting with "/" stops the app here.
+    {
+      provide: REFRESH_TOKEN_COOKIE_OPTIONS,
+      inject: [ConfigService],
+      useFactory: loadRefreshTokenCookieOptions,
+    },
     { provide: USER_REPOSITORY, useClass: PgUserRepository },
     { provide: PASSWORD_HASHER, useClass: Argon2PasswordHasher },
     JwtAccessTokenService,

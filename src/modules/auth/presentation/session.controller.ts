@@ -15,7 +15,7 @@ import {
   ApiOkResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import type { Request, Response } from 'express';
+import type { CookieOptions, Request, Response } from 'express';
 import { Public } from '../../../shared/auth/public.decorator.js';
 import { LoginUseCase } from '../application/login.use-case.js';
 import { LogoutUseCase } from '../application/logout.use-case.js';
@@ -28,20 +28,22 @@ import { LoginRequestDto } from './login.request.dto.js';
 import {
   clearRefreshTokenCookie,
   readRefreshTokenCookie,
+  REFRESH_TOKEN_COOKIE_OPTIONS,
   setRefreshTokenCookie,
 } from './refresh-token.cookie.js';
 
 const SETS_REFRESH_TOKEN_COOKIE = {
   'Set-Cookie': {
     description:
-      'refresh_token=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=/auth; Expires=<7 days later>',
+      'refresh_token=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=<REFRESH_TOKEN_COOKIE_PATH, default /auth>; Expires=<7 days later>',
     schema: { type: 'string' },
   },
 };
 
 const CLEARS_REFRESH_TOKEN_COOKIE = {
   'Set-Cookie': {
-    description: 'Expires the refresh_token cookie on Path=/auth',
+    description:
+      'Expires the refresh_token cookie on Path=<REFRESH_TOKEN_COOKIE_PATH, default /auth>',
     schema: { type: 'string' },
   },
 };
@@ -52,16 +54,6 @@ const toAccessTokenResponse = (session: Session): AccessTokenResponseDto => ({
   expiresIn: session.accessToken.expiresInSeconds,
 });
 
-// Login and refresh answer the same way: the access token in the body and
-// the (new) refresh token in the cookie.
-const respondWithSession = (
-  response: Response,
-  session: Session,
-): AccessTokenResponseDto => {
-  setRefreshTokenCookie(response, session.refreshToken);
-  return toAccessTokenResponse(session);
-};
-
 @Controller('auth')
 export class SessionController {
   constructor(
@@ -71,6 +63,8 @@ export class SessionController {
     private readonly refreshSessionUseCase: RefreshSessionUseCase,
     @Inject(LogoutUseCase)
     private readonly logoutUseCase: LogoutUseCase,
+    @Inject(REFRESH_TOKEN_COOKIE_OPTIONS)
+    private readonly cookieOptions: CookieOptions,
   ) {}
 
   @ApiOkResponse({
@@ -91,7 +85,7 @@ export class SessionController {
   ): Promise<AccessTokenResponseDto> {
     try {
       const session = await this.loginUseCase.execute(body);
-      return respondWithSession(response, session);
+      return this.respondWithSession(response, session);
     } catch (error) {
       throw toHttpError(error);
     }
@@ -118,7 +112,7 @@ export class SessionController {
       const session = await this.refreshSessionUseCase.execute(
         presentedRefreshToken,
       );
-      return respondWithSession(response, session);
+      return this.respondWithSession(response, session);
     } catch (error) {
       throw toHttpError(error);
     }
@@ -139,6 +133,16 @@ export class SessionController {
   ): Promise<void> {
     const presentedRefreshToken = readRefreshTokenCookie(request);
     await this.logoutUseCase.execute(presentedRefreshToken);
-    clearRefreshTokenCookie(response);
+    clearRefreshTokenCookie(response, this.cookieOptions);
+  }
+
+  // Login and refresh answer the same way: the access token in the body and
+  // the (new) refresh token in the cookie.
+  private respondWithSession(
+    response: Response,
+    session: Session,
+  ): AccessTokenResponseDto {
+    setRefreshTokenCookie(response, session.refreshToken, this.cookieOptions);
+    return toAccessTokenResponse(session);
   }
 }

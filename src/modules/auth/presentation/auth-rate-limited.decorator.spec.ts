@@ -15,6 +15,7 @@ import { InvalidCredentialsError } from '../domain/auth.errors.js';
 import { AuthController } from './auth.controller.js';
 import { loadAuthRateLimitOptions } from './auth-rate-limit.config.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
+import { REFRESH_TOKEN_COOKIE_OPTIONS } from './refresh-token.cookie.js';
 import { SessionController } from './session.controller.js';
 
 const DEFAULT_LIMIT = 5;
@@ -55,6 +56,7 @@ const startApp = async (): Promise<INestApplication> => {
       },
       { provide: RefreshSessionUseCase, useValue: fakeUseCase(vi.fn()) },
       { provide: LogoutUseCase, useValue: fakeUseCase(vi.fn()) },
+      { provide: REFRESH_TOKEN_COOKIE_OPTIONS, useValue: {} },
       {
         provide: ACCESS_TOKEN_VERIFIER,
         useValue: { verify: () => Promise.resolve({ userId: USER_ID }) },

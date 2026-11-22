@@ -1,5 +1,5 @@
 import { UnauthorizedException } from '@nestjs/common';
-import type { Request, Response } from 'express';
+import type { CookieOptions, Request, Response } from 'express';
 import type { LoginUseCase } from '../application/login.use-case.js';
 import type { LogoutUseCase } from '../application/logout.use-case.js';
 import type { RefreshSessionUseCase } from '../application/refresh-session.use-case.js';
@@ -14,6 +14,13 @@ const LOGIN_REQUEST = {
   password: 'correct-horse-battery',
 };
 const EXPIRES_AT = new Date('2026-11-17T12:00:00Z');
+
+const COOKIE_OPTIONS: CookieOptions = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'strict',
+  path: '/api/auth',
+};
 
 const SESSION = {
   accessToken: { value: 'signed.jwt.token', expiresInSeconds: 900 },
@@ -37,6 +44,7 @@ const controllerWith = (fakes: UseCaseFakes) =>
     { execute: fakes.login ?? vi.fn() } as LoginUseCase,
     { execute: fakes.refreshSession ?? vi.fn() } as RefreshSessionUseCase,
     { execute: fakes.logout ?? vi.fn() } as LogoutUseCase,
+    COOKIE_OPTIONS,
   );
 
 const fakeResponse = () => {
@@ -77,7 +85,7 @@ describe('SessionController', () => {
     expect(cookie).toHaveBeenCalledWith(
       'refresh_token',
       'new-refresh-token',
-      expect.objectContaining({ expires: EXPIRES_AT }),
+      expect.objectContaining({ path: '/api/auth', expires: EXPIRES_AT }),
     );
   });
 
@@ -156,7 +164,7 @@ describe('SessionController', () => {
     expect(execute).toHaveBeenCalledWith('current-token');
   });
 
-  it('should clear the refresh token cookie on logout', async () => {
+  it('should clear the refresh token cookie on its configured path on logout', async () => {
     // Arrange
     const controller = controllerWith({
       logout: vi.fn().mockResolvedValue(undefined),
@@ -169,7 +177,7 @@ describe('SessionController', () => {
     // Assert
     expect(clearCookie).toHaveBeenCalledWith(
       'refresh_token',
-      expect.objectContaining({ path: '/auth' }),
+      expect.objectContaining({ path: '/api/auth' }),
     );
   });
 });
