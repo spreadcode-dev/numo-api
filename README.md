@@ -26,7 +26,7 @@ Check: `node -v` prints `v26.x` and `yarn -v` prints `4.x`. If `yarn -v` prints 
 ```bash
 cp .env.example .env                    # once; then set your own local passwords
 openssl rand -base64 48                 # once; paste it as JWT_ACCESS_SECRET in .env (the API won't start without it)
-docker compose up -d                    # Postgres (see Database below)
+docker compose up -d postgres           # Postgres only (see Database below)
 yarn start:dev                          # watch mode on http://localhost:3000
 curl -i http://localhost:3000/health    # → 200 {"status":"ok"}
 curl -i http://localhost:3000/health/db # → 200 {"status":"ok","database":"up"}
@@ -34,6 +34,25 @@ open http://localhost:3000/docs         # API docs (Swagger UI), see API documen
 ```
 
 Environment variables are listed in [`.env.example`](.env.example). The app loads `.env` on startup (`@nestjs/config`); variables already set in the process environment win, e.g. `PORT=4000 yarn start:dev`.
+
+## Run in containers
+
+The whole backend can also run in Docker, built like a production image ([`Dockerfile`](Dockerfile): compiled `dist/` and production dependencies only, as the non-root `node` user). The `api` container reads the same `.env` (secrets are never baked into the image), reaches Postgres by service name, and is published on `localhost:${API_CONTAINER_PORT}` (default `3100`), so it runs alongside `yarn start:dev` on 3000.
+
+```bash
+docker compose up -d --build            # builds the API image, starts postgres + api
+docker compose ps                       # wait until both are healthy
+curl -i http://localhost:3100/health    # → 200 {"status":"ok"}
+curl -i http://localhost:3100/health/db # → 200 {"status":"ok","database":"up"}
+```
+
+| Command                            | What it does                                                               |
+| ---------------------------------- | -------------------------------------------------------------------------- |
+| `docker compose up -d --build api` | Rebuilds and restarts the API after code changes (no hot reload inside it) |
+| `docker compose logs -f api`       | Follows the API logs                                                       |
+| `docker compose stop api`          | Stops only the API, closing its database pool; Postgres keeps running      |
+
+The `curl` examples below use port 3000 (host mode); against the container, use 3100. numo-web can point at it with `NUMO_API_URL=http://localhost:3100`.
 
 ## API documentation
 
@@ -56,15 +75,15 @@ The title is `NuMo API` and the version comes from `package.json`. Set `SWAGGER_
 
 Postgres 17 runs locally in a container ([`docker-compose.yml`](docker-compose.yml)), with its data in a named volume. It needs Docker running. Docker Compose reads the same `.env` file as the API. Don't use `$` in `.env` values: Docker Compose treats it as a variable reference.
 
-| Command                  | What it does                                               |
-| ------------------------ | ---------------------------------------------------------- |
-| `docker compose up -d`   | Starts Postgres on `localhost:${DB_PORT}` (default `5432`) |
-| `docker compose ps`      | Shows the `postgres` service; wait for `healthy`           |
-| `docker compose stop`    | Stops the container and keeps the data                     |
-| `docker compose down`    | Removes the container and keeps the data (volume)          |
-| `docker compose down -v` | **Resets everything**: removes the volume and all data     |
-| `yarn db:users`          | Re-runs the users script (idempotent; container must run)  |
-| `yarn db:schema`         | Applies the schema script (idempotent; container must run) |
+| Command                         | What it does                                               |
+| ------------------------------- | ---------------------------------------------------------- |
+| `docker compose up -d postgres` | Starts Postgres on `localhost:${DB_PORT}` (default `5432`) |
+| `docker compose ps`             | Shows the services; wait for `healthy`                     |
+| `docker compose stop`           | Stops the container and keeps the data                     |
+| `docker compose down`           | Removes the container and keeps the data (volume)          |
+| `docker compose down -v`        | **Resets everything**: removes the volume and all data     |
+| `yarn db:users`                 | Re-runs the users script (idempotent; container must run)  |
+| `yarn db:schema`                | Applies the schema script (idempotent; container must run) |
 
 ### Users (least privilege)
 
@@ -115,7 +134,7 @@ Later changes go at the end of the script as `ALTER ... IF NOT EXISTS` or guarde
 
 ### API connection
 
-The API connects only as `DB_APP_USER` through a `pg` pool ([`src/shared/database`](src/shared/database)), closed on shutdown. `GET /health/db` runs `SELECT 1`:
+The API connects only as `DB_APP_USER` through a `pg` pool ([`src/shared/database`](src/shared/database)), closed on shutdown. A connection that Postgres drops (restart, stop) is logged, not fatal: the pool opens a new one on the next query. `GET /health/db` runs `SELECT 1`:
 
 ```bash
 curl -i http://localhost:3000/health/db  # → 200 {"status":"ok","database":"up"}
