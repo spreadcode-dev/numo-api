@@ -1,0 +1,24 @@
+# Built inside the image, never copied from the host
+node_modules
+dist
+coverage
+.yarn
+
+# Secrets: provided at runtime through docker compose's env_file, never baked in
+.env
+.env.*
+!.env.example
+
+# Not needed to build or run the API
+.git
+.github
+.husky
+.vscode
+.user-stories
+**/*.spec.ts
+db
+Dockerfile
+docker-compose.yml
+*.md
+*.log
+.DS_Store

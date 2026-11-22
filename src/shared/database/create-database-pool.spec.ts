@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createDatabasePool } from './create-database-pool.js';
 
@@ -37,5 +38,43 @@ describe('createDatabasePool', () => {
 
     // Assert
     expect(create).toThrow('DB_APP_PASSWORD');
+  });
+
+  describe('when an idle connection fails', () => {
+    const connectionTerminated = new Error(
+      'terminating connection due to administrator command',
+    );
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('should not crash the API', () => {
+      // Arrange
+      vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const pool = createDatabasePool(new ConfigService(APP_DATABASE_ENV));
+
+      // Act
+      const emitError = () => pool.emit('error', connectionTerminated);
+
+      // Assert
+      expect(emitError).not.toThrow();
+    });
+
+    it('should log the error', () => {
+      // Arrange
+      const logError = vi
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      const pool = createDatabasePool(new ConfigService(APP_DATABASE_ENV));
+
+      // Act
+      pool.emit('error', connectionTerminated);
+
+      // Assert
+      expect(logError).toHaveBeenCalledWith(
+        'Idle database connection lost: terminating connection due to administrator command',
+      );
+    });
   });
 });

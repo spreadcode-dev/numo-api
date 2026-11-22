@@ -27,5 +27,22 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build: .
+    container_name: numo-api
+    restart: unless-stopped
+    # Same .env as the host; secrets stay out of the image and out of this file.
+    env_file: .env
+    # Override the host values from .env: inside the compose network Postgres is reached by service name.
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      PORT: 3000
+    ports:
+      - '${API_CONTAINER_PORT:-3100}:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   numo-postgres-data:
