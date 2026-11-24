@@ -7,13 +7,13 @@ import {
   ApiOkResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { Public } from '../../../shared/auth/public.decorator.js';
+import { Public } from '@shared/auth/public.decorator.js';
 import { GetCurrentUserUseCase } from '../application/get-current-user.use-case.js';
 import { RegisterUserUseCase } from '../application/register-user.use-case.js';
 import { toHttpError } from './auth-error.mapper.js';
 import { AuthRateLimited } from './auth-rate-limited.decorator.js';
-import type { AuthenticatedUser } from './authenticated-request.js';
-import { CurrentUser } from './current-user.decorator.js';
+import type { AuthenticatedUser } from '@shared/auth/authenticated-request.js';
+import { CurrentUser } from '@shared/auth/current-user.decorator.js';
 import { CurrentUserResponseDto } from './current-user.response.dto.js';
 import { RegisterUserRequestDto } from './register-user.request.dto.js';
 import { RegisterUserResponseDto } from './register-user.response.dto.js';

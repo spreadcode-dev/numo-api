@@ -25,3 +25,20 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS refresh_tokens_family_id_idx ON refresh_tokens (family_id);
+
+CREATE TABLE IF NOT EXISTS accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users (id),
+    name VARCHAR(60) NOT NULL,
+    type TEXT NOT NULL CONSTRAINT accounts_type_check
+        CHECK (type IN ('checking', 'savings', 'credit_card', 'cash', 'investment')),
+    currency CHAR(3) NOT NULL DEFAULT 'BRL' CONSTRAINT accounts_currency_check
+        CHECK (currency = 'BRL'),
+    opening_balance BIGINT NOT NULL,
+    archived_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS accounts_user_id_name_lower_key
+    ON accounts (user_id, lower(name));

@@ -14,6 +14,10 @@
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": ".",
+    "paths": {
+      "@modules/*": ["./src/modules/*"],
+      "@shared/*": ["./src/shared/*"]
+    },
     "incremental": true,
     "skipLibCheck": true,
     "strict": true,
