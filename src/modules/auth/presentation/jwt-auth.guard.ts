@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
-import { IS_PUBLIC_KEY } from '../../../shared/auth/public.decorator.js';
+import { IS_PUBLIC_KEY } from '@shared/auth/public.decorator.js';
 import {
   ACCESS_TOKEN_VERIFIER,
   type AccessTokenVerifier,
@@ -16,7 +16,7 @@ import { toHttpError } from './auth-error.mapper.js';
 import type {
   AuthenticatedRequest,
   AuthenticatedUser,
-} from './authenticated-request.js';
+} from '@shared/auth/authenticated-request.js';
 
 const BEARER_SCHEME = 'bearer';
 

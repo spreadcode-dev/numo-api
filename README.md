@@ -127,10 +127,11 @@ yarn db:schema   # safe to run again: existing objects are skipped ("already exi
 
 Later changes go at the end of the script as `ALTER ... IF NOT EXISTS` or guarded `DO $$` blocks, never by editing a `CREATE` that already ran.
 
-| Table            | Columns                                                                                                                                                                                                            |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `users`          | `id` (uuid), `email` (unique, case-insensitive), `password_hash` (argon2id), `created_at`, `updated_at`                                                                                                            |
-| `refresh_tokens` | `id` (uuid), `user_id` (→ `users`), `family_id` (one per login), `token_hash` (SHA-256 hex, unique), `expires_at`, `revoked_at` (empty while active), `replaced_by_id` (→ the token that rotated it), `created_at` |
+| Table            | Columns                                                                                                                                                                                                                                                                                             |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`          | `id` (uuid), `email` (unique, case-insensitive), `password_hash` (argon2id), `created_at`, `updated_at`                                                                                                                                                                                             |
+| `refresh_tokens` | `id` (uuid), `user_id` (→ `users`), `family_id` (one per login), `token_hash` (SHA-256 hex, unique), `expires_at`, `revoked_at` (empty while active), `replaced_by_id` (→ the token that rotated it), `created_at`                                                                                  |
+| `accounts`       | `id` (uuid), `user_id` (→ `users`), `name` (1–60, unique per user, case-insensitive), `type` (named `CHECK`: `checking`, `savings`, `credit_card`, `cash`, `investment`), `currency` (`BRL` only), `opening_balance` (bigint cents), `archived_at` (empty while active), `created_at`, `updated_at` |
 
 ### API connection
 
@@ -245,6 +246,36 @@ for i in $(seq 6); do curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost
 Start with `AUTH_THROTTLE_TTL=10s yarn start:dev` to watch the window reset quickly.
 
 Counters live in memory: they reset when the API restarts and are not shared between instances (a shared store such as Redis is needed once several instances run). Behind a reverse proxy every client would share the proxy's IP; Express `trust proxy` must be configured when a hosted environment exists.
+
+## Accounts
+
+`POST /accounts` registers where the user's money is (a bank account, credit card, cash or investment) with an opening balance. `GET /accounts` lists the caller's accounts sorted by name, ignoring case and accents. Both need a token, and every query is scoped to the user in it, so another user's accounts are never visible. Both need the schema applied (`yarn db:schema`).
+
+- **Money is signed integer cents**, never a float: `-150000` is −R$ 1,500.00. Values beyond `Number.MAX_SAFE_INTEGER` are rejected.
+- **`type`** is one of `checking`, `savings`, `credit_card`, `cash`, `investment`. A credit card is a plain account whose balance usually goes negative.
+- **`currency`** is optional and must be `BRL` (the default).
+- **`name`** is trimmed, 1–60 characters, and unique per user in any casing.
+- **`balance`** is computed, not stored. For now it equals `openingBalance`.
+- **`archivedAt`** appears only on archived accounts (archiving isn't available yet).
+
+```bash
+curl -i -X POST localhost:3000/accounts -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Nubank card","type":"credit_card","openingBalance":-150000}'
+# → 201 {"id":"…","name":"Nubank card","type":"credit_card","currency":"BRL","openingBalance":-150000,"balance":-150000}
+
+curl -i localhost:3000/accounts -H "Authorization: Bearer $TOKEN"
+# → 200 [{"id":"…","name":"Nubank card",…,"balance":-150000}]
+```
+
+`TOKEN` comes from [Login](#login).
+
+| Status | When                                                                                                                                        |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `201`  | `POST`: account created                                                                                                                     |
+| `200`  | `GET`: the caller's accounts (`[]` if none)                                                                                                 |
+| `400`  | `POST`: unknown `type`, name empty or over 60 characters, non-integer `openingBalance`, `currency` other than `BRL`, or an unexpected field |
+| `401`  | Missing, expired or invalid token                                                                                                           |
+| `409`  | `POST`: the user already has an account with that name (any casing)                                                                         |
 
 ## Quality checks
 
@@ -372,11 +403,13 @@ src/
     presentation/    # controllers, request/response DTOs
     <feature>.module.ts
   shared/            # small cross-cutting pieces
-    database/        # pg pool (app user), closed on shutdown
+    database/        # pg pool (app user), closed on shutdown; isUniqueViolation() for Postgres errors
     config/          # env value parsers shared by modules (durations like 15m)
     openapi/         # Swagger setup (/docs)
-    auth/            # @Public() decorator (opt out of the global JwtAuthGuard)
+    auth/            # @Public() (opt out of the global JwtAuthGuard), @CurrentUser() and AuthenticatedUser
 db/                  # Postgres users and schema scripts, and their container init wrappers
 ```
 
-Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard`, `@CurrentUser()` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`.
+Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase` and `ListAccountsUseCase` in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`.
+
+Imports that leave a feature may use the path aliases `@shared/*` and `@modules/*` (set in `tsconfig.json`; `nest build` rewrites them to relative paths in `dist/`). Imports inside a feature stay relative.
