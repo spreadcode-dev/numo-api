@@ -157,4 +157,95 @@ describe('PgAccountRepository', () => {
     // Assert
     await expect(list).rejects.toThrow(InvalidAmountError);
   });
+
+  it("should find one of the user's accounts by id", async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [ACCOUNT_ROW] });
+    const repository = new PgAccountRepository(poolWithQuery(query));
+
+    // Act
+    const account = await repository.findById(USER_ID, ACCOUNT_ROW.id);
+
+    // Assert
+    expect(account).toEqual(ACCOUNT);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('WHERE id = $1 AND user_id = $2'),
+      [ACCOUNT_ROW.id, USER_ID],
+    );
+  });
+
+  it('should find nothing when no row matches the id and user', async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new PgAccountRepository(poolWithQuery(query));
+
+    // Act
+    const account = await repository.findById(USER_ID, ACCOUNT_ROW.id);
+
+    // Assert
+    expect(account).toBeUndefined();
+  });
+
+  it("should save the editable fields of the owner's account", async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [ACCOUNT_ROW] });
+    const repository = new PgAccountRepository(poolWithQuery(query));
+
+    // Act
+    const account = await repository.update(ACCOUNT);
+
+    // Assert
+    expect(account).toEqual(ACCOUNT);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('WHERE id = $1 AND user_id = $2'),
+      [ACCOUNT_ROW.id, USER_ID, 'Nubank card', 'credit_card', -150000],
+    );
+  });
+
+  it('should report a duplicate name when the unique index rejects the update', async () => {
+    // Arrange
+    const query = vi.fn().mockRejectedValue({ code: '23505' });
+    const repository = new PgAccountRepository(poolWithQuery(query));
+
+    // Act
+    const update = repository.update(ACCOUNT);
+
+    // Assert
+    await expect(update).rejects.toThrow(AccountNameAlreadyUsedError);
+  });
+
+  it('should stamp the archive date with the database clock', async () => {
+    // Arrange
+    const archivedAt = new Date('2026-12-01T09:00:00Z');
+    const query = vi.fn().mockResolvedValue({
+      rows: [{ ...ACCOUNT_ROW, archived_at: archivedAt }],
+    });
+    const repository = new PgAccountRepository(poolWithQuery(query));
+
+    // Act
+    const account = await repository.archive(USER_ID, ACCOUNT_ROW.id);
+
+    // Assert
+    expect(account.archivedAt).toBe(archivedAt);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('archived_at = now()'),
+      [ACCOUNT_ROW.id, USER_ID],
+    );
+  });
+
+  it('should clear the archive date when unarchiving', async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [ACCOUNT_ROW] });
+    const repository = new PgAccountRepository(poolWithQuery(query));
+
+    // Act
+    const account = await repository.unarchive(USER_ID, ACCOUNT_ROW.id);
+
+    // Assert
+    expect(account.archivedAt).toBeUndefined();
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('archived_at = NULL'),
+      [ACCOUNT_ROW.id, USER_ID],
+    );
+  });
 });

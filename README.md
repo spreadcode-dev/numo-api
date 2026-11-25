@@ -249,14 +249,15 @@ Counters live in memory: they reset when the API restarts and are not shared bet
 
 ## Accounts
 
-`POST /accounts` registers where the user's money is (a bank account, credit card, cash or investment) with an opening balance. `GET /accounts` lists the caller's accounts sorted by name, ignoring case and accents. Both need a token, and every query is scoped to the user in it, so another user's accounts are never visible. Both need the schema applied (`yarn db:schema`).
+`POST /accounts` registers where the user's money is (a bank account, credit card, cash or investment) with an opening balance. `GET /accounts` lists the caller's active accounts sorted by name, ignoring case and accents; `?includeArchived=true` adds the archived ones. `PATCH /accounts/:id` edits any of `name`, `type` and `openingBalance`, and `POST /accounts/:id/archive` / `POST /accounts/:id/unarchive` hide and restore an account. All need a token, and every query is scoped to the user in it, so another user's accounts are never visible: their ids answer `404`, like unknown ones. All need the schema applied (`yarn db:schema`).
 
 - **Money is signed integer cents**, never a float: `-150000` is −R$ 1,500.00. Values beyond `Number.MAX_SAFE_INTEGER` are rejected.
 - **`type`** is one of `checking`, `savings`, `credit_card`, `cash`, `investment`. A credit card is a plain account whose balance usually goes negative.
 - **`currency`** is optional and must be `BRL` (the default).
 - **`name`** is trimmed, 1–60 characters, and unique per user in any casing.
 - **`balance`** is computed, not stored. For now it equals `openingBalance`.
-- **`archivedAt`** appears only on archived accounts (archiving isn't available yet).
+- **`archivedAt`** appears only on archived accounts. Accounts are never deleted (the app's database user has no `DELETE` grant): archiving hides an account from the default list but keeps it, and its history, in place. Archiving or unarchiving twice is harmless and keeps the first archive date.
+- **Editing `openingBalance` is a correction**, not a transaction: the balance is computed from it, so it changes too. `currency` can't be edited (`400`).
 
 ```bash
 curl -i -X POST localhost:3000/accounts -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
@@ -265,17 +266,31 @@ curl -i -X POST localhost:3000/accounts -H "Authorization: Bearer $TOKEN" -H 'Co
 
 curl -i localhost:3000/accounts -H "Authorization: Bearer $TOKEN"
 # → 200 [{"id":"…","name":"Nubank card",…,"balance":-150000}]
+
+curl -i -X PATCH localhost:3000/accounts/$ACCOUNT_ID -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Itaú checking"}'
+# → 200 {"id":"…","name":"Itaú checking",…}
+
+curl -i -X POST localhost:3000/accounts/$ACCOUNT_ID/archive -H "Authorization: Bearer $TOKEN"
+# → 200 {…,"archivedAt":"2026-11-25T21:42:23.146Z"}
+
+curl -i 'localhost:3000/accounts?includeArchived=true' -H "Authorization: Bearer $TOKEN"
+# → 200 [ …archived accounts included… ]
+
+curl -i -X POST localhost:3000/accounts/$ACCOUNT_ID/unarchive -H "Authorization: Bearer $TOKEN"
+# → 200 {…} (no archivedAt)
 ```
 
-`TOKEN` comes from [Login](#login).
+`TOKEN` comes from [Login](#login); `ACCOUNT_ID` is the `id` returned by `POST /accounts`.
 
-| Status | When                                                                                                                                        |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `201`  | `POST`: account created                                                                                                                     |
-| `200`  | `GET`: the caller's accounts (`[]` if none)                                                                                                 |
-| `400`  | `POST`: unknown `type`, name empty or over 60 characters, non-integer `openingBalance`, `currency` other than `BRL`, or an unexpected field |
-| `401`  | Missing, expired or invalid token                                                                                                           |
-| `409`  | `POST`: the user already has an account with that name (any casing)                                                                         |
+| Status | When                                                                                                                                                                                                                                 |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `201`  | `POST /accounts`: account created                                                                                                                                                                                                    |
+| `200`  | `GET`: the caller's accounts (`[]` if none); `PATCH`, `archive`, `unarchive`: the account, also when it was already archived or active                                                                                               |
+| `400`  | Unknown `type`, name empty or over 60 characters, non-integer `openingBalance`, `currency` other than `BRL` on create or any `currency` on edit, a `null` field, an unexpected field, or `includeArchived` other than `true`/`false` |
+| `401`  | Missing, expired or invalid token                                                                                                                                                                                                    |
+| `404`  | `PATCH`, `archive`, `unarchive`: no account with that id for the caller (unknown, another user's, or not a UUID)                                                                                                                     |
+| `409`  | `POST`, `PATCH`: the user already has another account with that name (any casing)                                                                                                                                                    |
 
 ## Quality checks
 
@@ -410,6 +425,6 @@ src/
 db/                  # Postgres users and schema scripts, and their container init wrappers
 ```
 
-Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase` and `ListAccountsUseCase` in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`.
+Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase`, `ListAccountsUseCase`, `UpdateAccountUseCase`, `ArchiveAccountUseCase` and `UnarchiveAccountUseCase` (sharing the `findOwnedAccount` helper) in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`.
 
 Imports that leave a feature may use the path aliases `@shared/*` and `@modules/*` (set in `tsconfig.json`; `nest build` rewrites them to relative paths in `dist/`). Imports inside a feature stay relative.

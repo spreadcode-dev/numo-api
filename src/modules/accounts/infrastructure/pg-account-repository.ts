@@ -42,6 +42,11 @@ const toAccount = (row: AccountRow): Account => ({
   updatedAt: row.updated_at,
 });
 
+// The unique index on (user_id, lower(name)) is the last line of defence when
+// two requests race past the existsByName check.
+const toWriteError = (error: unknown): unknown =>
+  isUniqueViolation(error) ? new AccountNameAlreadyUsedError() : error;
+
 @Injectable()
 export class PgAccountRepository implements AccountRepository {
   constructor(@Inject(PG_POOL) private readonly pool: Pick<Pool, 'query'>) {}
@@ -71,10 +76,7 @@ export class PgAccountRepository implements AccountRepository {
       );
       return toAccount(result.rows[0]);
     } catch (error) {
-      if (isUniqueViolation(error)) {
-        throw new AccountNameAlreadyUsedError();
-      }
-      throw error;
+      throw toWriteError(error);
     }
   }
 
@@ -85,5 +87,60 @@ export class PgAccountRepository implements AccountRepository {
     );
 
     return result.rows.map(toAccount);
+  }
+
+  async findById(
+    userId: string,
+    accountId: string,
+  ): Promise<Account | undefined> {
+    const result = await this.pool.query<AccountRow>(
+      `SELECT ${ACCOUNT_COLUMNS} FROM accounts WHERE id = $1 AND user_id = $2`,
+      [accountId, userId],
+    );
+
+    return result.rows.map(toAccount).at(0);
+  }
+
+  async update(account: Account): Promise<Account> {
+    try {
+      const result = await this.pool.query<AccountRow>(
+        `UPDATE accounts
+            SET name = $3, type = $4, opening_balance = $5, updated_at = now()
+          WHERE id = $1 AND user_id = $2
+          RETURNING ${ACCOUNT_COLUMNS}`,
+        [
+          account.id,
+          account.userId,
+          account.name.value,
+          account.type,
+          account.openingBalance,
+        ],
+      );
+      return toAccount(result.rows[0]);
+    } catch (error) {
+      throw toWriteError(error);
+    }
+  }
+
+  async archive(userId: string, accountId: string): Promise<Account> {
+    const result = await this.pool.query<AccountRow>(
+      `UPDATE accounts SET archived_at = now(), updated_at = now()
+        WHERE id = $1 AND user_id = $2
+        RETURNING ${ACCOUNT_COLUMNS}`,
+      [accountId, userId],
+    );
+
+    return toAccount(result.rows[0]);
+  }
+
+  async unarchive(userId: string, accountId: string): Promise<Account> {
+    const result = await this.pool.query<AccountRow>(
+      `UPDATE accounts SET archived_at = NULL, updated_at = now()
+        WHERE id = $1 AND user_id = $2
+        RETURNING ${ACCOUNT_COLUMNS}`,
+      [accountId, userId],
+    );
+
+    return toAccount(result.rows[0]);
   }
 }

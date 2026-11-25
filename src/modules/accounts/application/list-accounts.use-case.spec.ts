@@ -8,6 +8,7 @@ const BRUNO = 'user-bruno';
 const createUseCases = () => {
   const accountRepository = new InMemoryAccountRepository();
   return {
+    accountRepository,
     createAccount: new CreateAccountUseCase(accountRepository),
     listAccounts: new ListAccountsUseCase(accountRepository),
   };
@@ -27,7 +28,10 @@ describe('ListAccountsUseCase', () => {
     }
 
     // Act
-    const accounts = await listAccounts.execute(ANA);
+    const accounts = await listAccounts.execute({
+      userId: ANA,
+      includeArchived: false,
+    });
 
     // Assert
     expect(accounts.map((account) => account.name)).toEqual([
@@ -49,7 +53,10 @@ describe('ListAccountsUseCase', () => {
     });
 
     // Act
-    const accounts = await listAccounts.execute(BRUNO);
+    const accounts = await listAccounts.execute({
+      userId: BRUNO,
+      includeArchived: false,
+    });
 
     // Assert
     expect(accounts).toEqual([]);
@@ -66,9 +73,54 @@ describe('ListAccountsUseCase', () => {
     });
 
     // Act
-    const [wallet] = await listAccounts.execute(ANA);
+    const [wallet] = await listAccounts.execute({
+      userId: ANA,
+      includeArchived: false,
+    });
 
     // Assert
     expect(wallet.balance).toBe(25000);
+  });
+
+  it('should hide archived accounts by default', async () => {
+    // Arrange
+    const { accountRepository, createAccount, listAccounts } = createUseCases();
+    const wallet = await createAccount.execute({
+      userId: ANA,
+      name: 'Wallet',
+      type: 'cash',
+      openingBalance: 0,
+    });
+    await accountRepository.archive(ANA, wallet.id);
+
+    // Act
+    const accounts = await listAccounts.execute({
+      userId: ANA,
+      includeArchived: false,
+    });
+
+    // Assert
+    expect(accounts).toEqual([]);
+  });
+
+  it('should include archived accounts when asked', async () => {
+    // Arrange
+    const { accountRepository, createAccount, listAccounts } = createUseCases();
+    const wallet = await createAccount.execute({
+      userId: ANA,
+      name: 'Wallet',
+      type: 'cash',
+      openingBalance: 0,
+    });
+    await accountRepository.archive(ANA, wallet.id);
+
+    // Act
+    const accounts = await listAccounts.execute({
+      userId: ANA,
+      includeArchived: true,
+    });
+
+    // Assert
+    expect(accounts.map((account) => account.name)).toEqual(['Wallet']);
   });
 });

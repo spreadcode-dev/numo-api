@@ -19,4 +19,8 @@ export interface AccountRepository {
   existsByName(userId: string, name: AccountName): Promise<boolean>;
   create(newAccount: NewAccount): Promise<Account>;
   listByUser(userId: string): Promise<Account[]>;
+  findById(userId: string, accountId: string): Promise<Account | undefined>;
+  update(account: Account): Promise<Account>;
+  archive(userId: string, accountId: string): Promise<Account>;
+  unarchive(userId: string, accountId: string): Promise<Account>;
 }

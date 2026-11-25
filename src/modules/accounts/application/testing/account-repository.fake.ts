@@ -34,4 +34,39 @@ export class InMemoryAccountRepository implements AccountRepository {
     const owned = this.accounts.filter((account) => account.userId === userId);
     return Promise.resolve(owned);
   }
+
+  findById(userId: string, accountId: string): Promise<Account | undefined> {
+    const found = this.accounts.find(
+      (account) => account.userId === userId && account.id === accountId,
+    );
+    return Promise.resolve(found);
+  }
+
+  update(account: Account): Promise<Account> {
+    const updated: Account = { ...account, updatedAt: new Date() };
+    const index = this.accounts.findIndex((stored) => stored.id === account.id);
+    this.accounts[index] = updated;
+    return Promise.resolve(updated);
+  }
+
+  async archive(userId: string, accountId: string): Promise<Account> {
+    const account = await this.ownedAccount(userId, accountId);
+    return this.update({ ...account, archivedAt: new Date() });
+  }
+
+  async unarchive(userId: string, accountId: string): Promise<Account> {
+    const account = await this.ownedAccount(userId, accountId);
+    return this.update({ ...account, archivedAt: undefined });
+  }
+
+  private async ownedAccount(
+    userId: string,
+    accountId: string,
+  ): Promise<Account> {
+    const account = await this.findById(userId, accountId);
+    if (!account) {
+      throw new Error(`Fake has no account ${accountId} for ${userId}`);
+    }
+    return account;
+  }
 }
