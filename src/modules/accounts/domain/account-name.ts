@@ -14,4 +14,9 @@ export class AccountName {
     }
     return new AccountName(trimmed);
   }
+
+  // Mirrors the unique index on lower(name): names differing only in casing collide.
+  matches(other: AccountName): boolean {
+    return this.value.toLowerCase() === other.value.toLowerCase();
+  }
 }

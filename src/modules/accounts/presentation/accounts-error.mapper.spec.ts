@@ -1,6 +1,11 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   AccountNameAlreadyUsedError,
+  AccountNotFoundError,
   InvalidAccountNameError,
   InvalidAccountTypeError,
   InvalidAmountError,
@@ -15,6 +20,14 @@ describe('toHttpError', () => {
 
     // Assert
     expect(httpError).toBeInstanceOf(ConflictException);
+  });
+
+  it('should map a missing account to 404', () => {
+    // Act
+    const httpError = toHttpError(new AccountNotFoundError());
+
+    // Assert
+    expect(httpError).toBeInstanceOf(NotFoundException);
   });
 
   it.each([

@@ -33,4 +33,26 @@ describe('AccountName', () => {
     // Assert
     expect(create).toThrow(InvalidAccountNameError);
   });
+
+  it('should match a name that differs only in casing', () => {
+    // Arrange
+    const name = AccountName.create('Nubank card');
+
+    // Act
+    const matches = name.matches(AccountName.create('NUBANK CARD'));
+
+    // Assert
+    expect(matches).toBe(true);
+  });
+
+  it('should not match a different name', () => {
+    // Arrange
+    const name = AccountName.create('Nubank card');
+
+    // Act
+    const matches = name.matches(AccountName.create('Inter'));
+
+    // Assert
+    expect(matches).toBe(false);
+  });
 });

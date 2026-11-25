@@ -38,3 +38,10 @@ export class AccountNameAlreadyUsedError extends Error {
     this.name = 'AccountNameAlreadyUsedError';
   }
 }
+
+export class AccountNotFoundError extends Error {
+  constructor(message: string = 'Account not found') {
+    super(message);
+    this.name = 'AccountNotFoundError';
+  }
+}
