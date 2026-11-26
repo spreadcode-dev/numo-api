@@ -474,6 +474,33 @@ curl -i -X DELETE localhost:3000/labels/$LABEL_ID -H "Authorization: Bearer $TOK
 | `404`  | `PATCH`, `DELETE`: no label with that id for the caller (unknown, another user's, or not a UUID)                  |
 | `409`  | `POST`, `PATCH`: the user already has another label with that name (any casing)                                   |
 
+## Reports
+
+Read-only views over the caller's money. They need a token and the schema applied (`yarn db:schema`), and only ever read the token user's data.
+
+### Net worth
+
+`GET /reports/net-worth` answers the caller's net worth and the balance of each account in one call, for the dashboard.
+
+- **`accounts`** lists the caller's **non-archived** accounts as `{ id, name, type, balance }`, highest balance first (same balance, then by name). `balance` is computed exactly as in [`GET /accounts`](#accounts).
+- **`total`** is the plain sum of those balances, in cents. A credit card counts negatively because its balance already is, and [transfers](#transfers) cancel out on their own.
+- **`currency`** is always `BRL`: one currency per user, so the total needs no conversion.
+- **Archiving an account takes its balance out of the total**, even if money is left in it. Bring an account to zero (for example with a transfer) before archiving it to keep net worth unchanged.
+
+```bash
+# Checking 100000, savings 250000, credit card -150000
+curl -i localhost:3000/reports/net-worth -H "Authorization: Bearer $TOKEN"
+# → 200 {"currency":"BRL","total":200000,"accounts":[{"id":"…","name":"Savings","type":"savings","balance":250000},{…,"balance":100000},{…,"type":"credit_card","balance":-150000}]}
+
+# A user without accounts
+# → 200 {"currency":"BRL","total":0,"accounts":[]}
+```
+
+| Status | When                                                         |
+| ------ | ------------------------------------------------------------ |
+| `200`  | The net worth (`total: 0` and `accounts: []` if no accounts) |
+| `401`  | Missing, expired or invalid token                            |
+
 ## Quality checks
 
 | Command             | What it does                                                         |
