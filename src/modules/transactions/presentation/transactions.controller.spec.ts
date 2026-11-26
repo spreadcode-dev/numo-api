@@ -7,8 +7,10 @@ import type { DeleteTransactionUseCase } from '../application/delete-transaction
 import type { ListTransactionsUseCase } from '../application/list-transactions.use-case.js';
 import type { RecordTransactionUseCase } from '../application/record-transaction.use-case.js';
 import type { ReplaceTransactionUseCase } from '../application/replace-transaction.use-case.js';
+import type { SetTransactionLabelsUseCase } from '../application/set-transaction-labels.use-case.js';
 import {
   InvalidPageLimitError,
+  InvalidTransactionLabelsError,
   TransactionAccountArchivedError,
   TransactionNotFoundError,
 } from '../domain/transactions.errors.js';
@@ -23,13 +25,24 @@ const REQUEST = {
   description: 'Market',
 };
 
-const TRANSACTION = { id: '1d2e3f4a-0000-4000-8000-000000000001', ...REQUEST };
+const LABEL = {
+  id: '3c4d5e6f-0000-4000-8000-000000000001',
+  name: 'Trip',
+  color: '#2563eb',
+};
+
+const TRANSACTION = {
+  id: '1d2e3f4a-0000-4000-8000-000000000001',
+  ...REQUEST,
+  labels: [LABEL],
+};
 
 type UseCaseFakes = {
   recordTransaction?: RecordTransactionUseCase['execute'];
   listTransactions?: ListTransactionsUseCase['execute'];
   replaceTransaction?: ReplaceTransactionUseCase['execute'];
   deleteTransaction?: DeleteTransactionUseCase['execute'];
+  setTransactionLabels?: SetTransactionLabelsUseCase['execute'];
 };
 
 const controllerWith = (fakes: UseCaseFakes) =>
@@ -42,6 +55,9 @@ const controllerWith = (fakes: UseCaseFakes) =>
     {
       execute: fakes.deleteTransaction ?? vi.fn(),
     } as DeleteTransactionUseCase,
+    {
+      execute: fakes.setTransactionLabels ?? vi.fn(),
+    } as SetTransactionLabelsUseCase,
   );
 
 describe('TransactionsController', () => {
@@ -81,6 +97,7 @@ describe('TransactionsController', () => {
     // Act
     const response = await controller.list(USER, {
       accountId: REQUEST.accountId,
+      labelId: LABEL.id,
       from: '2026-11-01',
       to: '2026-11-30',
       limit: '20',
@@ -92,6 +109,7 @@ describe('TransactionsController', () => {
     expect(execute).toHaveBeenCalledWith({
       userId: USER.id,
       accountId: REQUEST.accountId,
+      labelId: LABEL.id,
       from: '2026-11-01',
       to: '2026-11-30',
       limit: 20,
@@ -184,5 +202,40 @@ describe('TransactionsController', () => {
 
     // Assert
     await expect(remove).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("should set the labels of the token user's transaction", async () => {
+    // Arrange
+    const execute = vi.fn().mockResolvedValue([LABEL]);
+    const controller = controllerWith({ setTransactionLabels: execute });
+
+    // Act
+    const response = await controller.setLabels(USER, TRANSACTION.id, {
+      labelIds: [LABEL.id],
+    });
+
+    // Assert
+    expect(response).toEqual([LABEL]);
+    expect(execute).toHaveBeenCalledWith({
+      userId: USER.id,
+      transactionId: TRANSACTION.id,
+      labelIds: [LABEL.id],
+    });
+  });
+
+  it('should answer 400 when there are too many labels', async () => {
+    // Arrange
+    const execute = vi
+      .fn()
+      .mockRejectedValue(new InvalidTransactionLabelsError());
+    const controller = controllerWith({ setTransactionLabels: execute });
+
+    // Act
+    const setLabels = controller.setLabels(USER, TRANSACTION.id, {
+      labelIds: [LABEL.id],
+    });
+
+    // Assert
+    await expect(setLabels).rejects.toBeInstanceOf(BadRequestException);
   });
 });

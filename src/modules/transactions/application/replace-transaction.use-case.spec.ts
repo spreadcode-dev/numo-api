@@ -9,6 +9,7 @@ import {
 import { RecordTransactionUseCase } from './record-transaction.use-case.js';
 import { ReplaceTransactionUseCase } from './replace-transaction.use-case.js';
 import { InMemoryAccountLookup } from './testing/account-lookup.fake.js';
+import { InMemoryLabelLookup } from './testing/label-lookup.fake.js';
 import { InMemoryTransactionRepository } from './testing/transaction-repository.fake.js';
 
 const ANA = 'user-ana';
@@ -26,8 +27,12 @@ const MARKET = {
   description: 'Market',
 };
 
+const TRIP = { id: 'label-trip', userId: ANA, name: 'Trip', color: '#2563eb' };
+
 const setUp = async () => {
-  const transactionRepository = new InMemoryTransactionRepository();
+  const labelLookup = new InMemoryLabelLookup();
+  labelLookup.labels.push(TRIP);
+  const transactionRepository = new InMemoryTransactionRepository(labelLookup);
   const accountLookup = new InMemoryAccountLookup();
   accountLookup.accounts.push(
     { id: ANA_ACCOUNT, userId: ANA, isArchived: false },
@@ -46,6 +51,7 @@ const setUp = async () => {
     replaceTransaction: new ReplaceTransactionUseCase(
       transactionRepository,
       accountLookup,
+      transactionRepository,
     ),
   };
 };
@@ -71,7 +77,28 @@ describe('ReplaceTransactionUseCase', () => {
       date: '2026-11-21',
       amount: -5000,
       description: 'Supermarket',
+      labels: [],
     });
+  });
+
+  it('should keep the labels the transaction already has', async () => {
+    // Arrange
+    const { transactionRepository, replacement, replaceTransaction } =
+      await setUp();
+    await transactionRepository.replaceLabels(replacement.transactionId, [
+      TRIP.id,
+    ]);
+
+    // Act
+    const transaction = await replaceTransaction.execute({
+      ...replacement,
+      amount: -5000,
+    });
+
+    // Assert
+    expect(transaction.labels).toEqual([
+      { id: TRIP.id, name: 'Trip', color: '#2563eb' },
+    ]);
   });
 
   it('should save the replacement in the repository', async () => {

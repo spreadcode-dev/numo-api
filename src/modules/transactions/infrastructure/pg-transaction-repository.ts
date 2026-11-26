@@ -60,6 +60,14 @@ const filtersFor = (query: TransactionPageQuery): Filter[] => {
       values: [query.accountId],
     });
   }
+  if (query.labelId !== undefined) {
+    filters.push({
+      condition: (labelId) =>
+        `EXISTS (SELECT 1 FROM transaction_labels tl
+                  WHERE tl.transaction_id = transactions.id AND tl.label_id = ${labelId})`,
+      values: [query.labelId],
+    });
+  }
   if (query.from) {
     filters.push({
       condition: (from) => `date >= ${from}::date`,

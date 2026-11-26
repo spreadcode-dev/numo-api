@@ -12,6 +12,7 @@ export type PagePosition = {
 export type TransactionPageQuery = {
   userId: string;
   accountId?: string;
+  labelId?: string;
   from?: TransactionDate;
   to?: TransactionDate;
   after?: PagePosition;

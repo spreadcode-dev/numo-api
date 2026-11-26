@@ -6,6 +6,7 @@ import {
   InvalidTransactionDateError,
 } from '../domain/transactions.errors.js';
 import { ListTransactionsUseCase } from './list-transactions.use-case.js';
+import { InMemoryLabelLookup } from './testing/label-lookup.fake.js';
 import { InMemoryTransactionRepository } from './testing/transaction-repository.fake.js';
 import type { TransactionView } from './transaction-view.js';
 
@@ -28,7 +29,7 @@ const setUp = async (seeds: Seed[]) => {
       description: TransactionDescription.create('Market'),
     });
   }
-  return new ListTransactionsUseCase(repository);
+  return new ListTransactionsUseCase(repository, repository);
 };
 
 // 120 transactions over 4 days, 30 per day, so many share a date.
@@ -217,5 +218,112 @@ describe('ListTransactionsUseCase', () => {
 
     // Assert
     await expect(list).rejects.toThrow(InvalidPageCursorError);
+  });
+});
+
+const TRIP = { id: 'label-trip', userId: ANA, name: 'Trip', color: '#2563eb' };
+const GROCERIES = {
+  id: 'label-groceries',
+  userId: ANA,
+  name: 'Groceries',
+  color: '#15803d',
+};
+
+// Three of Ana's transactions on separate days; the newest two are tagged.
+const setUpLabeled = async () => {
+  const labelLookup = new InMemoryLabelLookup();
+  labelLookup.labels.push(TRIP, GROCERIES);
+  const repository = new InMemoryTransactionRepository(labelLookup);
+  for (const date of ['2026-11-10', '2026-11-11', '2026-11-12']) {
+    await repository.create({
+      userId: ANA,
+      accountId: CHECKING,
+      date: TransactionDate.create(date),
+      amount: -100,
+      description: TransactionDescription.create('Market'),
+    });
+  }
+  const [oldest, middle, newest] = repository.transactions;
+  await repository.replaceLabels(newest.id, [TRIP.id, GROCERIES.id]);
+  await repository.replaceLabels(middle.id, [TRIP.id]);
+  return {
+    repository,
+    labelLookup,
+    oldest,
+    listTransactions: new ListTransactionsUseCase(repository, repository),
+  };
+};
+
+const labelNames = (item: TransactionView): string[] =>
+  item.labels.map((label) => label.name);
+
+describe('ListTransactionsUseCase with labels', () => {
+  it("should show each transaction's labels sorted by name, and none as an empty array", async () => {
+    // Arrange
+    const { listTransactions } = await setUpLabeled();
+
+    // Act
+    const page = await listTransactions.execute({ userId: ANA });
+
+    // Assert
+    expect(page.items.map(labelNames)).toEqual([
+      ['Groceries', 'Trip'],
+      ['Trip'],
+      [],
+    ]);
+    expect(page.items[0].labels[0]).toEqual({
+      id: GROCERIES.id,
+      name: 'Groceries',
+      color: '#15803d',
+    });
+  });
+
+  it('should filter by label', async () => {
+    // Arrange
+    const { listTransactions } = await setUpLabeled();
+
+    // Act
+    const page = await listTransactions.execute({
+      userId: ANA,
+      labelId: GROCERIES.id,
+    });
+
+    // Assert
+    expect(page.items.map((item) => item.date)).toEqual(['2026-11-12']);
+  });
+
+  it('should page through a label filter with the cursor', async () => {
+    // Arrange
+    const { listTransactions } = await setUpLabeled();
+    const first = await listTransactions.execute({
+      userId: ANA,
+      labelId: TRIP.id,
+      limit: 1,
+    });
+
+    // Act
+    const second = await listTransactions.execute({
+      userId: ANA,
+      labelId: TRIP.id,
+      limit: 1,
+      cursor: first.nextCursor,
+    });
+
+    // Assert
+    expect(first.items.map((item) => item.date)).toEqual(['2026-11-12']);
+    expect(second.items.map((item) => item.date)).toEqual(['2026-11-11']);
+    expect(second.nextCursor).toBeUndefined();
+  });
+
+  it('should drop a deleted label from every transaction', async () => {
+    // Arrange
+    const { labelLookup, listTransactions } = await setUpLabeled();
+    labelLookup.labels.splice(labelLookup.labels.indexOf(TRIP), 1);
+
+    // Act
+    const page = await listTransactions.execute({ userId: ANA });
+
+    // Assert
+    expect(page.items.map(labelNames)).toEqual([['Groceries'], [], []]);
   });
 });

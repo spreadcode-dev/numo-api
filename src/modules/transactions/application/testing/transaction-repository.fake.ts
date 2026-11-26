@@ -1,3 +1,5 @@
+import type { TransactionLabelRepository } from '../../domain/transaction-label-repository.js';
+import type { TransactionLabel } from '../../domain/transaction-label.js';
 import type {
   NewTransaction,
   TransactionRepository,
@@ -8,6 +10,9 @@ import type {
   TransactionPageQuery,
   TransactionReader,
 } from '../transaction-reader.js';
+import { InMemoryLabelLookup } from './label-lookup.fake.js';
+
+type Link = { transactionId: string; labelId: string };
 
 // Same order as the SQL: date, then id, newest first.
 const newestFirst = (left: PagePosition, right: PagePosition): number =>
@@ -21,19 +26,35 @@ const fakeId = (sequence: number): string =>
 const matches = (
   transaction: Transaction,
   query: TransactionPageQuery,
+  links: Link[],
 ): boolean =>
   transaction.userId === query.userId &&
+  (query.labelId === undefined ||
+    links.some(
+      (link) =>
+        link.transactionId === transaction.id && link.labelId === query.labelId,
+    )) &&
   (query.accountId === undefined ||
     transaction.accountId === query.accountId) &&
   (query.from === undefined || transaction.date.value >= query.from.value) &&
   (query.to === undefined || transaction.date.value <= query.to.value) &&
   (query.after === undefined || newestFirst(query.after, transaction) < 0);
 
+// Also holds the transaction_labels links; label names and colours come from
+// the label catalog, as the SQL join does.
 export class InMemoryTransactionRepository
-  implements TransactionRepository, TransactionReader
+  implements
+    TransactionRepository,
+    TransactionReader,
+    TransactionLabelRepository
 {
   readonly transactions: Transaction[] = [];
+  links: Link[] = [];
   private nextSequence = 1;
+
+  constructor(
+    private readonly labelCatalog: InMemoryLabelLookup = new InMemoryLabelLookup(),
+  ) {}
 
   create(newTransaction: NewTransaction): Promise<Transaction> {
     const now = new Date();
@@ -49,7 +70,7 @@ export class InMemoryTransactionRepository
 
   listPage(query: TransactionPageQuery): Promise<Transaction[]> {
     const page = this.transactions
-      .filter((transaction) => matches(transaction, query))
+      .filter((transaction) => matches(transaction, query, this.links))
       .sort(newestFirst)
       .slice(0, query.limit);
     return Promise.resolve(page);
@@ -75,8 +96,33 @@ export class InMemoryTransactionRepository
     const owned = this.findOwned(userId, transactionId);
     if (owned) {
       this.transactions.splice(this.transactions.indexOf(owned), 1);
+      this.links = this.links.filter(
+        (link) => link.transactionId !== transactionId,
+      );
     }
     return Promise.resolve();
+  }
+
+  replaceLabels(transactionId: string, labelIds: string[]): Promise<void> {
+    this.links = [
+      ...this.links.filter((link) => link.transactionId !== transactionId),
+      ...labelIds.map((labelId) => ({ transactionId, labelId })),
+    ];
+    return Promise.resolve();
+  }
+
+  labelsOf(transactionIds: string[]): Promise<Map<string, TransactionLabel[]>> {
+    const labels = new Map<string, TransactionLabel[]>();
+    for (const link of this.links) {
+      const label = this.labelCatalog.findById(link.labelId);
+      if (transactionIds.includes(link.transactionId) && label) {
+        labels.set(link.transactionId, [
+          ...(labels.get(link.transactionId) ?? []),
+          label,
+        ]);
+      }
+    }
+    return Promise.resolve(labels);
   }
 
   private findOwned(

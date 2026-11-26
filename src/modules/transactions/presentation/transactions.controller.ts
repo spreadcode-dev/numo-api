@@ -28,9 +28,12 @@ import { DeleteTransactionUseCase } from '../application/delete-transaction.use-
 import { ListTransactionsUseCase } from '../application/list-transactions.use-case.js';
 import { RecordTransactionUseCase } from '../application/record-transaction.use-case.js';
 import { ReplaceTransactionUseCase } from '../application/replace-transaction.use-case.js';
+import { SetTransactionLabelsUseCase } from '../application/set-transaction-labels.use-case.js';
 import { ListTransactionsQueryDto } from './list-transactions.query.dto.js';
 import { RecordTransactionRequestDto } from './record-transaction.request.dto.js';
 import { ReplaceTransactionRequestDto } from './replace-transaction.request.dto.js';
+import { SetTransactionLabelsRequestDto } from './set-transaction-labels.request.dto.js';
+import { TransactionLabelResponseDto } from './transaction-label.response.dto.js';
 import { TransactionPageResponseDto } from './transaction-page.response.dto.js';
 import { TransactionResponseDto } from './transaction.response.dto.js';
 import { toHttpError } from './transactions-error.mapper.js';
@@ -61,6 +64,8 @@ export class TransactionsController {
     private readonly replaceTransactionUseCase: ReplaceTransactionUseCase,
     @Inject(DeleteTransactionUseCase)
     private readonly deleteTransactionUseCase: DeleteTransactionUseCase,
+    @Inject(SetTransactionLabelsUseCase)
+    private readonly setTransactionLabelsUseCase: SetTransactionLabelsUseCase,
   ) {}
 
   @ApiCreatedResponse({ type: TransactionResponseDto })
@@ -95,7 +100,7 @@ export class TransactionsController {
   })
   @ApiBadRequestResponse({
     description:
-      'limit outside 1-100, a tampered or outdated cursor, from/to not a real YYYY-MM-DD day, accountId not a UUID, or unexpected parameters',
+      'limit outside 1-100, a tampered or outdated cursor, from/to not a real YYYY-MM-DD day, accountId or labelId not a UUID, or unexpected parameters',
   })
   @Get()
   async list(
@@ -106,6 +111,7 @@ export class TransactionsController {
       const page = await this.listTransactionsUseCase.execute({
         userId: user.id,
         accountId: query.accountId,
+        labelId: query.labelId,
         from: query.from,
         to: query.to,
         limit: query.limit === undefined ? undefined : Number(query.limit),
@@ -157,6 +163,35 @@ export class TransactionsController {
         userId: user.id,
         transactionId,
       });
+    } catch (error) {
+      throw toHttpError(error);
+    }
+  }
+
+  @ApiOkResponse({
+    type: [TransactionLabelResponseDto],
+    description: "The transaction's labels after the change, sorted by name",
+  })
+  @ApiBadRequestResponse({
+    description:
+      'labelIds not an array of UUIDs, more than 10 labels, the same label twice, or unexpected fields',
+  })
+  @ApiNotFoundResponse({
+    description: `${TRANSACTION_NOT_FOUND}, or one of the labels doesn't`,
+  })
+  @Put(':id/labels')
+  async setLabels(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', TRANSACTION_ID_PIPE) transactionId: string,
+    @Body() body: SetTransactionLabelsRequestDto,
+  ): Promise<TransactionLabelResponseDto[]> {
+    try {
+      const labels = await this.setTransactionLabelsUseCase.execute({
+        userId: user.id,
+        transactionId,
+        labelIds: body.labelIds,
+      });
+      return labels;
     } catch (error) {
       throw toHttpError(error);
     }

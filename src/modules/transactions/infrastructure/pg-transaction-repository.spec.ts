@@ -139,6 +139,39 @@ describe('PgTransactionRepository', () => {
     ]);
   });
 
+  it('should filter by label with EXISTS, keeping the order and cursor', async () => {
+    // Arrange
+    const labelId = '3c4d5e6f-0000-4000-8000-000000000001';
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new PgTransactionRepository(poolWithQuery(query));
+
+    // Act
+    await repository.listPage({
+      userId: USER_ID,
+      labelId,
+      after: {
+        date: TransactionDate.create('2026-11-20'),
+        id: TRANSACTION_ROW.id,
+      },
+      limit: 21,
+    });
+
+    // Assert
+    const [sql, params] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(
+      /EXISTS \(SELECT 1 FROM transaction_labels tl\s+WHERE tl\.transaction_id = transactions\.id AND tl\.label_id = \$2\)/,
+    );
+    expect(sql).toContain('(date, id) < ($3::date, $4::uuid)');
+    expect(sql).toContain('ORDER BY date DESC, id DESC');
+    expect(params).toEqual([
+      USER_ID,
+      labelId,
+      '2026-11-20',
+      TRANSACTION_ROW.id,
+      21,
+    ]);
+  });
+
   it('should page by position alone when only a cursor is sent', async () => {
     // Arrange
     const query = vi.fn().mockResolvedValue({ rows: [] });

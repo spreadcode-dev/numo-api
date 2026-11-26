@@ -82,3 +82,16 @@ CREATE INDEX IF NOT EXISTS transactions_user_id_date_id_idx
 CREATE INDEX IF NOT EXISTS transactions_account_id_idx ON transactions (account_id);
 
 GRANT DELETE ON transactions TO :"app_user";
+
+-- Which labels tag which transaction. Deleting either side removes the link.
+CREATE TABLE IF NOT EXISTS transaction_labels (
+    transaction_id UUID NOT NULL REFERENCES transactions (id) ON DELETE CASCADE,
+    label_id UUID NOT NULL REFERENCES labels (id) ON DELETE CASCADE,
+    PRIMARY KEY (transaction_id, label_id)
+);
+
+-- Serves the cascade when a label is deleted and the ?labelId= filter.
+CREATE INDEX IF NOT EXISTS transaction_labels_label_id_idx
+    ON transaction_labels (label_id);
+
+GRANT DELETE ON transaction_labels TO :"app_user";
