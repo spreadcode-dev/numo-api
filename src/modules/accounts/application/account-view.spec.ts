@@ -9,6 +9,7 @@ const ACCOUNT: Account = {
   type: 'credit_card',
   currency: 'BRL',
   openingBalance: -150000,
+  transactionsTotal: 0,
   createdAt: new Date('2026-11-24T12:00:00Z'),
   updatedAt: new Date('2026-11-24T12:00:00Z'),
 };
@@ -28,6 +29,18 @@ describe('toAccountView', () => {
       balance: -150000,
       archivedAt: undefined,
     });
+  });
+
+  it('should add the transactions to the opening balance', () => {
+    // Act
+    const view = toAccountView({
+      ...ACCOUNT,
+      openingBalance: 100000,
+      transactionsTotal: -4590,
+    });
+
+    // Assert
+    expect(view.balance).toBe(95410);
   });
 
   it('should keep the archive date of an archived account', () => {

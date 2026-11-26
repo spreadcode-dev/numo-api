@@ -20,15 +20,18 @@ type AccountRow = {
   type: string;
   currency: string;
   opening_balance: string;
+  transactions_total: string;
   archived_at: Date | null;
   created_at: Date;
   updated_at: Date;
 };
 
-const ACCOUNT_COLUMNS =
-  'id, user_id, name, type, currency, opening_balance, archived_at, created_at, updated_at';
+// The total is computed per row (also in RETURNING), so every account read or
+// written carries a balance that includes its transactions.
+const ACCOUNT_COLUMNS = `id, user_id, name, type, currency, opening_balance, archived_at, created_at, updated_at,
+  COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.account_id = accounts.id), 0) AS transactions_total`;
 
-// pg returns BIGINT as a string; toCents rejects values beyond Number.MAX_SAFE_INTEGER
+// pg returns BIGINT (and the NUMERIC sum) as a string; toCents rejects values beyond Number.MAX_SAFE_INTEGER
 // instead of letting Number() round them silently.
 const toAccount = (row: AccountRow): Account => ({
   id: row.id,
@@ -37,6 +40,7 @@ const toAccount = (row: AccountRow): Account => ({
   type: toAccountType(row.type),
   currency: toCurrency(row.currency),
   openingBalance: toCents(Number(row.opening_balance)),
+  transactionsTotal: toCents(Number(row.transactions_total)),
   archivedAt: row.archived_at ?? undefined,
   createdAt: row.created_at,
   updatedAt: row.updated_at,

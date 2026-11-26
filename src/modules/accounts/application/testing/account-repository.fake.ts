@@ -23,6 +23,7 @@ export class InMemoryAccountRepository implements AccountRepository {
     const account: Account = {
       id: `account-${this.accounts.length + 1}`,
       ...newAccount,
+      transactionsTotal: 0,
       createdAt: now,
       updatedAt: now,
     };

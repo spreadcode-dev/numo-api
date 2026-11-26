@@ -16,7 +16,8 @@ export class AccountResponseDto {
   openingBalance: number;
 
   @ApiProperty({
-    description: 'Signed integer cents, computed from the opening balance',
+    description:
+      'Signed integer cents: the opening balance plus the sum of the account transactions',
     example: -150000,
   })
   balance: number;

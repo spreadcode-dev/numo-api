@@ -13,13 +13,13 @@ export type AccountView = {
   archivedAt?: Date;
 };
 
-// Balance is computed, never stored. Until transactions exist (#36) it is the opening balance.
+// Balance is computed, never stored: correcting the opening balance moves it too.
 export const toAccountView = (account: Account): AccountView => ({
   id: account.id,
   name: account.name.value,
   type: account.type,
   currency: account.currency,
   openingBalance: account.openingBalance,
-  balance: account.openingBalance,
+  balance: account.openingBalance + account.transactionsTotal,
   archivedAt: account.archivedAt,
 });
