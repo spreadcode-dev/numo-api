@@ -33,6 +33,6 @@ export class RecordTransactionUseCase {
       amount,
       description,
     });
-    return toTransactionView(transaction);
+    return toTransactionView(transaction, []);
   }
 }

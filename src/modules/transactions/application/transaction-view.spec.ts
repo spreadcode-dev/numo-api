@@ -1,6 +1,12 @@
 import { TransactionDate } from '../domain/transaction-date.js';
 import { TransactionDescription } from '../domain/transaction-description.js';
-import { toTransactionView } from './transaction-view.js';
+import { sortLabelsByName, toTransactionView } from './transaction-view.js';
+
+const label = (name: string) => ({
+  id: `label-${name}`,
+  name,
+  color: '#2563eb',
+});
 
 describe('toTransactionView', () => {
   it('should expose the values as plain text and hide the owner and timestamps', () => {
@@ -18,7 +24,7 @@ describe('toTransactionView', () => {
     };
 
     // Act
-    const view = toTransactionView(transaction);
+    const view = toTransactionView(transaction, [label('Trip')]);
 
     // Assert
     expect(view).toEqual({
@@ -27,6 +33,25 @@ describe('toTransactionView', () => {
       date: '2026-11-20',
       amount: -4590,
       description: 'Market',
+      labels: [label('Trip')],
     });
+  });
+});
+
+describe('sortLabelsByName', () => {
+  it('should sort by name ignoring case and accents', () => {
+    // Act
+    const sorted = sortLabelsByName([
+      label('Trip'),
+      label('saúde'),
+      label('Lazer'),
+    ]);
+
+    // Assert
+    expect(sorted.map((sortedLabel) => sortedLabel.name)).toEqual([
+      'Lazer',
+      'saúde',
+      'Trip',
+    ]);
   });
 });

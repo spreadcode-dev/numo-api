@@ -2,6 +2,7 @@ import type { AccountLookup } from '../domain/account-lookup.js';
 import { toTransactionAmount } from '../domain/transaction-amount.js';
 import { TransactionDate } from '../domain/transaction-date.js';
 import { TransactionDescription } from '../domain/transaction-description.js';
+import type { TransactionLabelRepository } from '../domain/transaction-label-repository.js';
 import type { TransactionRepository } from '../domain/transaction-repository.js';
 import type { Transaction } from '../domain/transaction.js';
 import { ensureAccountAcceptsTransactions } from './ensure-account-accepts-transactions.js';
@@ -35,6 +36,7 @@ export class ReplaceTransactionUseCase {
   constructor(
     private readonly transactionRepository: TransactionRepository,
     private readonly accountLookup: AccountLookup,
+    private readonly transactionLabelRepository: TransactionLabelRepository,
   ) {}
 
   async execute(command: ReplaceTransactionCommand): Promise<TransactionView> {
@@ -51,6 +53,8 @@ export class ReplaceTransactionUseCase {
       ...transaction,
       ...replacement,
     });
-    return toTransactionView(saved);
+    // Labels are set on their own route; a replace keeps them as they are.
+    const labels = await this.transactionLabelRepository.labelsOf([saved.id]);
+    return toTransactionView(saved, labels.get(saved.id) ?? []);
   }
 }

@@ -9,8 +9,10 @@ import {
   InvalidTransactionAmountError,
   InvalidTransactionDateError,
   InvalidTransactionDescriptionError,
+  InvalidTransactionLabelsError,
   TransactionAccountArchivedError,
   TransactionAccountNotFoundError,
+  TransactionLabelNotFoundError,
   TransactionNotFoundError,
 } from '../domain/transactions.errors.js';
 import { toHttpError } from './transactions-error.mapper.js';
@@ -32,6 +34,14 @@ describe('toHttpError', () => {
     expect(httpError).toBeInstanceOf(NotFoundException);
   });
 
+  it('should map a missing label to 404', () => {
+    // Act
+    const httpError = toHttpError(new TransactionLabelNotFoundError());
+
+    // Assert
+    expect(httpError).toBeInstanceOf(NotFoundException);
+  });
+
   it('should map an archived account to 409', () => {
     // Act
     const httpError = toHttpError(new TransactionAccountArchivedError());
@@ -44,6 +54,7 @@ describe('toHttpError', () => {
     new InvalidTransactionAmountError(),
     new InvalidTransactionDateError(),
     new InvalidTransactionDescriptionError(),
+    new InvalidTransactionLabelsError(),
     new InvalidPageLimitError(),
     new InvalidPageCursorError(),
   ])('should map $name to 400 with its message', (error) => {

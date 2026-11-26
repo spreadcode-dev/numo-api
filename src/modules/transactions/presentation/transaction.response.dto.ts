@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { TransactionLabelResponseDto } from './transaction-label.response.dto.js';
 
 export class TransactionResponseDto {
   id: string;
@@ -15,4 +16,10 @@ export class TransactionResponseDto {
   amount: number;
 
   description: string;
+
+  @ApiProperty({
+    type: [TransactionLabelResponseDto],
+    description: 'Always an array, sorted by name ignoring case and accents',
+  })
+  labels: TransactionLabelResponseDto[];
 }

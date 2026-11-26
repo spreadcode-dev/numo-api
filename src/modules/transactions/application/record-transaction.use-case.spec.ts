@@ -55,6 +55,7 @@ describe('RecordTransactionUseCase', () => {
       date: '2026-11-20',
       amount: -4590,
       description: 'Market',
+      labels: [],
     });
     expect(transactionRepository.transactions[0].userId).toBe(ANA);
   });

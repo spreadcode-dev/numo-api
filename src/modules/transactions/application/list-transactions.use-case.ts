@@ -1,3 +1,4 @@
+import type { TransactionLabelRepository } from '../domain/transaction-label-repository.js';
 import { TransactionDate } from '../domain/transaction-date.js';
 import { InvalidPageLimitError } from '../domain/transactions.errors.js';
 import type { Transaction } from '../domain/transaction.js';
@@ -14,6 +15,7 @@ export const MAX_PAGE_LIMIT = 100;
 export type ListTransactionsQuery = {
   userId: string;
   accountId?: string;
+  labelId?: string;
   from?: string;
   to?: string;
   limit?: number;
@@ -38,6 +40,7 @@ const toOptionalDate = (raw?: string): TransactionDate | undefined =>
 const toPageQuery = (query: ListTransactionsQuery): TransactionPageQuery => ({
   userId: query.userId,
   accountId: query.accountId,
+  labelId: query.labelId,
   from: toOptionalDate(query.from),
   to: toOptionalDate(query.to),
   after:
@@ -46,7 +49,10 @@ const toPageQuery = (query: ListTransactionsQuery): TransactionPageQuery => ({
 });
 
 export class ListTransactionsUseCase {
-  constructor(private readonly transactionReader: TransactionReader) {}
+  constructor(
+    private readonly transactionReader: TransactionReader,
+    private readonly transactionLabelRepository: TransactionLabelRepository,
+  ) {}
 
   // Reads one row past the page: if it exists there is a next page, and the
   // cursor points at the last row returned, never at the extra one.
@@ -60,9 +66,19 @@ export class ListTransactionsUseCase {
     const hasNextPage = rows.length > pageQuery.limit;
 
     return {
-      items: items.map(toTransactionView),
+      items: await this.withLabels(items),
       nextCursor: hasNextPage ? cursorAfter(items) : undefined,
     };
+  }
+
+  // One query for the whole page's labels, never one per transaction.
+  private async withLabels(items: Transaction[]): Promise<TransactionView[]> {
+    const labels = await this.transactionLabelRepository.labelsOf(
+      items.map((item) => item.id),
+    );
+    return items.map((item) =>
+      toTransactionView(item, labels.get(item.id) ?? []),
+    );
   }
 }
 

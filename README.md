@@ -87,13 +87,13 @@ Postgres 17 runs locally in a container ([`docker-compose.yml`](docker-compose.y
 
 ### Users (least privilege)
 
-| Role                  | Used by                          | Can                                                                                |
-| --------------------- | -------------------------------- | ---------------------------------------------------------------------------------- |
-| `numo_superuser`      | Setup and emergencies only       | Everything (owns the container and `numo_db`)                                      |
-| `numo_migration_user` | Schema script (`yarn db:schema`) | DDL on schema `public`                                                             |
-| `numo_app_user`       | The API at runtime, and only it  | `SELECT`, `INSERT`, `UPDATE`; `DELETE` only on `labels` and `transactions`; no DDL |
+| Role                  | Used by                          | Can                                                                                                      |
+| --------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `numo_superuser`      | Setup and emergencies only       | Everything (owns the container and `numo_db`)                                                            |
+| `numo_migration_user` | Schema script (`yarn db:schema`) | DDL on schema `public`                                                                                   |
+| `numo_app_user`       | The API at runtime, and only it  | `SELECT`, `INSERT`, `UPDATE`; `DELETE` only on `labels`, `transactions` and `transaction_labels`; no DDL |
 
-[`db/users.sql`](db/users.sql) creates the roles and grants. It runs automatically on the container's **first boot** (empty volume) through [`db/init-users.sh`](db/init-users.sh), with passwords from `.env`. After changing the script or a password, run `yarn db:users` (or `docker compose down -v && docker compose up -d` to start from scratch). Tables created by `numo_migration_user` are automatically readable and writable by `numo_app_user` (`ALTER DEFAULT PRIVILEGES FOR ROLE numo_migration_user`). `DELETE` is never a default: [`db/schema.sql`](db/schema.sql) grants it table by table, only where users can delete rows (today, `labels` and `transactions`), with `GRANT DELETE ON <table> TO :"app_user";` right after the table (`db/init-schema.sh` passes `app_user`).
+[`db/users.sql`](db/users.sql) creates the roles and grants. It runs automatically on the container's **first boot** (empty volume) through [`db/init-users.sh`](db/init-users.sh), with passwords from `.env`. After changing the script or a password, run `yarn db:users` (or `docker compose down -v && docker compose up -d` to start from scratch). Tables created by `numo_migration_user` are automatically readable and writable by `numo_app_user` (`ALTER DEFAULT PRIVILEGES FOR ROLE numo_migration_user`). `DELETE` is never a default: [`db/schema.sql`](db/schema.sql) grants it table by table, only where users can delete rows (today, `labels`, `transactions` and `transaction_labels`), with `GRANT DELETE ON <table> TO :"app_user";` right after the table (`db/init-schema.sh` passes `app_user`).
 
 Connect with `psql` from your machine (e.g. `brew install libpq`); it asks for the password from `.env`:
 
@@ -127,13 +127,14 @@ yarn db:schema   # safe to run again: existing objects are skipped ("already exi
 
 Later changes go at the end of the script as `ALTER ... IF NOT EXISTS` or guarded `DO $$` blocks, never by editing a `CREATE` that already ran.
 
-| Table            | Columns                                                                                                                                                                                                                                                                                             |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `users`          | `id` (uuid), `email` (unique, case-insensitive), `password_hash` (argon2id), `created_at`, `updated_at`                                                                                                                                                                                             |
-| `refresh_tokens` | `id` (uuid), `user_id` (→ `users`), `family_id` (one per login), `token_hash` (SHA-256 hex, unique), `expires_at`, `revoked_at` (empty while active), `replaced_by_id` (→ the token that rotated it), `created_at`                                                                                  |
-| `transactions`   | `id` (uuid), `user_id` (→ `users`), `account_id` (→ `accounts`), `date` (calendar day, no time zone), `amount` (bigint signed cents, never `0`), `description` (1–140), `created_at`, `updated_at`; indexed on `(user_id, date DESC, id DESC)` and `account_id`                                     |
-| `labels`         | `id` (uuid), `user_id` (→ `users`), `name` (1–30, unique per user, case-insensitive), `color` (`#rrggbb`, lowercase; the palette is checked by the API, not the DB), `created_at`, `updated_at`                                                                                                     |
-| `accounts`       | `id` (uuid), `user_id` (→ `users`), `name` (1–60, unique per user, case-insensitive), `type` (named `CHECK`: `checking`, `savings`, `credit_card`, `cash`, `investment`), `currency` (`BRL` only), `opening_balance` (bigint cents), `archived_at` (empty while active), `created_at`, `updated_at` |
+| Table                | Columns                                                                                                                                                                                                                                                                                             |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`              | `id` (uuid), `email` (unique, case-insensitive), `password_hash` (argon2id), `created_at`, `updated_at`                                                                                                                                                                                             |
+| `refresh_tokens`     | `id` (uuid), `user_id` (→ `users`), `family_id` (one per login), `token_hash` (SHA-256 hex, unique), `expires_at`, `revoked_at` (empty while active), `replaced_by_id` (→ the token that rotated it), `created_at`                                                                                  |
+| `transactions`       | `id` (uuid), `user_id` (→ `users`), `account_id` (→ `accounts`), `date` (calendar day, no time zone), `amount` (bigint signed cents, never `0`), `description` (1–140), `created_at`, `updated_at`; indexed on `(user_id, date DESC, id DESC)` and `account_id`                                     |
+| `transaction_labels` | `transaction_id` (→ `transactions`), `label_id` (→ `labels`), primary key on both; deleting either side removes the link (`ON DELETE CASCADE`); indexed on `label_id`                                                                                                                               |
+| `labels`             | `id` (uuid), `user_id` (→ `users`), `name` (1–30, unique per user, case-insensitive), `color` (`#rrggbb`, lowercase; the palette is checked by the API, not the DB), `created_at`, `updated_at`                                                                                                     |
+| `accounts`           | `id` (uuid), `user_id` (→ `users`), `name` (1–60, unique per user, case-insensitive), `type` (named `CHECK`: `checking`, `savings`, `credit_card`, `cash`, `investment`), `currency` (`BRL` only), `opening_balance` (bigint cents), `archived_at` (empty while active), `created_at`, `updated_at` |
 
 ### API connection
 
@@ -306,7 +307,7 @@ curl -i -X POST localhost:3000/accounts/$ACCOUNT_ID/unarchive -H "Authorization:
 ```bash
 curl -i -X POST localhost:3000/transactions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d "{\"accountId\":\"$ACCOUNT_ID\",\"date\":\"2026-11-20\",\"amount\":-4590,\"description\":\"Market\"}"
-# → 201 {"id":"…","accountId":"…","date":"2026-11-20","amount":-4590,"description":"Market"}
+# → 201 {"id":"…","accountId":"…","date":"2026-11-20","amount":-4590,"description":"Market","labels":[]}
 
 curl -i localhost:3000/accounts -H "Authorization: Bearer $TOKEN"
 # → 200 [{"id":"…",…,"openingBalance":100000,"balance":95410}]
@@ -324,19 +325,20 @@ curl -i localhost:3000/accounts -H "Authorization: Bearer $TOKEN"
 
 `GET /transactions` lists the caller's transactions **newest first** (by `date`, then `id` to break ties). Every filter is optional and they combine with AND:
 
-| Parameter   | What it does                                                                                  |
-| ----------- | --------------------------------------------------------------------------------------------- |
-| `accountId` | Only that account's transactions. Another user's account gives `{"items":[]}`, never an error |
-| `from`      | First day included, `YYYY-MM-DD`                                                              |
-| `to`        | Last day included, `YYYY-MM-DD`                                                               |
-| `limit`     | Page size, 1–100 (default `50`)                                                               |
-| `cursor`    | The `nextCursor` of the previous page, passed back unchanged                                  |
+| Parameter   | What it does                                                                                        |
+| ----------- | --------------------------------------------------------------------------------------------------- |
+| `accountId` | Only that account's transactions. Another user's account gives `{"items":[]}`, never an error       |
+| `labelId`   | Only transactions tagged with that label. Another user's label gives `{"items":[]}`, never an error |
+| `from`      | First day included, `YYYY-MM-DD`                                                                    |
+| `to`        | Last day included, `YYYY-MM-DD`                                                                     |
+| `limit`     | Page size, 1–100 (default `50`)                                                                     |
+| `cursor`    | The `nextCursor` of the previous page, passed back unchanged                                        |
 
 The response is `{ "items": [...], "nextCursor": "…" }`. `nextCursor` is **absent on the last page**. Paging is keyset-based, not `OFFSET`: the cursor is an opaque, versioned encoding of the last row's `(date, id)`, so pages stay stable when transactions are added meanwhile, and it uses the `(user_id, date DESC, id DESC)` index. Keep the same filters while following a cursor.
 
 ```bash
 curl -s 'localhost:3000/transactions?from=2026-11-01&to=2026-11-30&limit=20' -H "Authorization: Bearer $TOKEN"
-# → 200 {"items":[{"id":"…","accountId":"…","date":"2026-11-20","amount":-4590,"description":"Market"},…],"nextCursor":"djF8…"}
+# → 200 {"items":[{"id":"…","accountId":"…","date":"2026-11-20","amount":-4590,"description":"Market","labels":[{"id":"…","name":"Trip","color":"#2563eb"}]},…],"nextCursor":"djF8…"}
 
 # Follow every page (needs jq)
 CURSOR=''
@@ -348,20 +350,20 @@ while :; do
 done
 ```
 
-| Status | When                                                                                                                                                                   |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `200`  | A page of the caller's transactions (`{"items":[]}` if none match)                                                                                                     |
-| `400`  | `limit` outside 1–100 or not a whole number, a tampered or outdated `cursor`, `from`/`to` not a real `YYYY-MM-DD` day, `accountId` not a UUID, an unexpected parameter |
-| `401`  | Missing, expired or invalid token                                                                                                                                      |
+| Status | When                                                                                                                                                                                |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `200`  | A page of the caller's transactions (`{"items":[]}` if none match)                                                                                                                  |
+| `400`  | `limit` outside 1–100 or not a whole number, a tampered or outdated `cursor`, `from`/`to` not a real `YYYY-MM-DD` day, `accountId` or `labelId` not a UUID, an unexpected parameter |
+| `401`  | Missing, expired or invalid token                                                                                                                                                   |
 
 ### Editing and deleting
 
-`PUT /transactions/:id` replaces a transaction with the **full body** (`{ accountId, date, amount, description }`, every field required), checked with the same rules as recording: the target `accountId` must be one of the caller's accounts and not archived. That means a transaction can be moved off an archived account onto an active one, but not edited while it stays on an archived one. `DELETE /transactions/:id` removes it for good (there is no undo), whether or not its account is archived. Both update the account's `balance` right away. Another user's transaction, an unknown id or an id that isn't a UUID all answer `404`.
+`PUT /transactions/:id` replaces a transaction with the **full body** (`{ accountId, date, amount, description }`, every field required), checked with the same rules as recording: the target `accountId` must be one of the caller's accounts and not archived. That means a transaction can be moved off an archived account onto an active one, but not edited while it stays on an archived one. `DELETE /transactions/:id` removes it for good (there is no undo), whether or not its account is archived. Both update the account's `balance` right away. A replace keeps the transaction's labels; deleting a transaction removes its labels with it. Another user's transaction, an unknown id or an id that isn't a UUID all answer `404`.
 
 ```bash
 curl -i -X PUT localhost:3000/transactions/$TRANSACTION_ID -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d "{\"accountId\":\"$ACCOUNT_ID\",\"date\":\"2026-11-20\",\"amount\":-5000,\"description\":\"Market\"}"
-# → 200 {"id":"…","accountId":"…","date":"2026-11-20","amount":-5000,"description":"Market"}   (balance moves by -410 from -4590)
+# → 200 {"id":"…","accountId":"…","date":"2026-11-20","amount":-5000,"description":"Market","labels":[…]}   (balance moves by -410 from -4590)
 
 curl -i -X DELETE localhost:3000/transactions/$TRANSACTION_ID -H "Authorization: Bearer $TOKEN"
 # → 204, and the balance goes back
@@ -376,7 +378,27 @@ curl -i -X DELETE localhost:3000/transactions/$TRANSACTION_ID -H "Authorization:
 | `404`  | No transaction with that id for the caller (unknown, another user's, or not a UUID); `PUT`: or no such account |
 | `409`  | `PUT`: the target account is archived                                                                          |
 
-Transfers and labels on transactions come in later issues.
+### Labels on transactions
+
+Every transaction carries `labels` (always an array, sorted by name ignoring case and accents, `[]` when untagged) in all its responses. `PUT /transactions/:id/labels` with `{ "labelIds": [...] }` **replaces the whole set**: sending the same set twice changes nothing, and `[]` removes them all. At most 10 different labels per transaction, and each must be one of the caller's labels. It answers `200` with the transaction's labels. Deleting a label (`DELETE /labels/:id`) removes it from every transaction. Filter with `GET /transactions?labelId=` (see [Listing and paging](#listing-and-paging)).
+
+```bash
+curl -i -X PUT localhost:3000/transactions/$TRANSACTION_ID/labels -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"labelIds\":[\"$GROCERIES_ID\",\"$TRIP_ID\"]}"
+# → 200 [{"id":"…","name":"Groceries","color":"#15803d"},{"id":"…","name":"Trip","color":"#2563eb"}]
+
+curl -s "localhost:3000/transactions?labelId=$TRIP_ID" -H "Authorization: Bearer $TOKEN"
+# → 200 {"items":[{…,"labels":[{"id":"…","name":"Groceries",…},{"id":"…","name":"Trip",…}]}]}
+```
+
+| Status | When                                                                                                                    |
+| ------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `200`  | Labels replaced; the body is the transaction's labels                                                                   |
+| `400`  | `labelIds` not an array of UUIDs, more than 10 labels, the same label twice, or an unexpected field                     |
+| `401`  | Missing, expired or invalid token                                                                                       |
+| `404`  | No transaction with that id for the caller (unknown, another user's, or not a UUID), or a label that isn't the caller's |
+
+Transfers come in a later issue.
 
 ## Labels
 
@@ -557,6 +579,6 @@ src/
 db/                  # Postgres users and schema scripts, and their container init wrappers
 ```
 
-Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase`, `ListAccountsUseCase`, `UpdateAccountUseCase`, `ArchiveAccountUseCase` and `UnarchiveAccountUseCase` (sharing the `findOwnedAccount` helper) in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`. `transactions` has the `TransactionDate`/`TransactionDescription` value objects, `toTransactionAmount`, and the `TransactionRepository` and `AccountLookup` ports in `domain/` (the lookup asks only whether the user owns the account and whether it's archived, so the module doesn't reach into `accounts`); `RecordTransactionUseCase`, `ListTransactionsUseCase`, `ReplaceTransactionUseCase` and `DeleteTransactionUseCase` (sharing the `findOwnedTransaction` and `ensureAccountAcceptsTransactions` helpers), the `TransactionReader` query port and the page cursor in `application/`; `PgTransactionRepository` (serving both the write and the read port) and `PgAccountLookup` in `infrastructure/`; and the `TransactionsController` with its error mapper in `presentation/`. `labels` too: the `LabelName` and `LabelColor` (palette) value objects and the `LabelRepository` port in `domain/`; `CreateLabelUseCase`, `ListLabelsUseCase`, `UpdateLabelUseCase` and `DeleteLabelUseCase` (sharing `findOwnedLabel`) in `application/`; `PgLabelRepository` in `infrastructure/`; and the `LabelsController` with its error mapper in `presentation/`.
+Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase`, `ListAccountsUseCase`, `UpdateAccountUseCase`, `ArchiveAccountUseCase` and `UnarchiveAccountUseCase` (sharing the `findOwnedAccount` helper) in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`. `transactions` has the `TransactionDate`/`TransactionDescription` value objects, `toTransactionAmount`, the label-id rule (`toTransactionLabelIds`), and the `TransactionRepository`, `TransactionLabelRepository`, `AccountLookup` and `LabelLookup` ports in `domain/` (the lookups ask only what transactions need about an account or label, so the module doesn't reach into `accounts` or `labels`); `RecordTransactionUseCase`, `ListTransactionsUseCase`, `ReplaceTransactionUseCase`, `DeleteTransactionUseCase` and `SetTransactionLabelsUseCase` (sharing the `findOwnedTransaction` and `ensureAccountAcceptsTransactions` helpers), the `TransactionReader` query port and the page cursor in `application/`; `PgTransactionRepository` (serving both the write and the read port), `PgTransactionLabelRepository`, `PgAccountLookup` and `PgLabelLookup` in `infrastructure/`; and the `TransactionsController` with its error mapper in `presentation/`. `labels` too: the `LabelName` and `LabelColor` (palette) value objects and the `LabelRepository` port in `domain/`; `CreateLabelUseCase`, `ListLabelsUseCase`, `UpdateLabelUseCase` and `DeleteLabelUseCase` (sharing `findOwnedLabel`) in `application/`; `PgLabelRepository` in `infrastructure/`; and the `LabelsController` with its error mapper in `presentation/`.
 
 Imports that leave a feature may use the path aliases `@shared/*` and `@modules/*` (set in `tsconfig.json`; `nest build` rewrites them to relative paths in `dist/`). Imports inside a feature stay relative.

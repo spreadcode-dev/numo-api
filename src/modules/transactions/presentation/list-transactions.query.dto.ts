@@ -19,6 +19,15 @@ export class ListTransactionsQueryDto {
   accountId?: string;
 
   @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      "Only transactions tagged with this label. Another user's label gives an empty list",
+  })
+  @IsOptional()
+  @IsUUID()
+  labelId?: string;
+
+  @ApiPropertyOptional({
     format: 'date',
     description: 'First day included (YYYY-MM-DD)',
     example: '2026-11-01',

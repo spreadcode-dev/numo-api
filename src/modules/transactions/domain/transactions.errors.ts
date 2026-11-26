@@ -61,3 +61,19 @@ export class TransactionNotFoundError extends Error {
     this.name = 'TransactionNotFoundError';
   }
 }
+
+export class InvalidTransactionLabelsError extends Error {
+  constructor(
+    message: string = 'labelIds must hold at most 10 different labels',
+  ) {
+    super(message);
+    this.name = 'InvalidTransactionLabelsError';
+  }
+}
+
+export class TransactionLabelNotFoundError extends Error {
+  constructor(message: string = 'Label not found') {
+    super(message);
+    this.name = 'TransactionLabelNotFoundError';
+  }
+}
