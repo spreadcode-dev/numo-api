@@ -87,13 +87,13 @@ Postgres 17 runs locally in a container ([`docker-compose.yml`](docker-compose.y
 
 ### Users (least privilege)
 
-| Role                  | Used by                          | Can                                                             |
-| --------------------- | -------------------------------- | --------------------------------------------------------------- |
-| `numo_superuser`      | Setup and emergencies only       | Everything (owns the container and `numo_db`)                   |
-| `numo_migration_user` | Schema script (`yarn db:schema`) | DDL on schema `public`                                          |
-| `numo_app_user`       | The API at runtime, and only it  | `SELECT`, `INSERT`, `UPDATE`; `DELETE` only on `labels`; no DDL |
+| Role                  | Used by                          | Can                                                                                |
+| --------------------- | -------------------------------- | ---------------------------------------------------------------------------------- |
+| `numo_superuser`      | Setup and emergencies only       | Everything (owns the container and `numo_db`)                                      |
+| `numo_migration_user` | Schema script (`yarn db:schema`) | DDL on schema `public`                                                             |
+| `numo_app_user`       | The API at runtime, and only it  | `SELECT`, `INSERT`, `UPDATE`; `DELETE` only on `labels` and `transactions`; no DDL |
 
-[`db/users.sql`](db/users.sql) creates the roles and grants. It runs automatically on the container's **first boot** (empty volume) through [`db/init-users.sh`](db/init-users.sh), with passwords from `.env`. After changing the script or a password, run `yarn db:users` (or `docker compose down -v && docker compose up -d` to start from scratch). Tables created by `numo_migration_user` are automatically readable and writable by `numo_app_user` (`ALTER DEFAULT PRIVILEGES FOR ROLE numo_migration_user`). `DELETE` is never a default: [`db/schema.sql`](db/schema.sql) grants it table by table, only where users can delete rows (today, `labels`).
+[`db/users.sql`](db/users.sql) creates the roles and grants. It runs automatically on the container's **first boot** (empty volume) through [`db/init-users.sh`](db/init-users.sh), with passwords from `.env`. After changing the script or a password, run `yarn db:users` (or `docker compose down -v && docker compose up -d` to start from scratch). Tables created by `numo_migration_user` are automatically readable and writable by `numo_app_user` (`ALTER DEFAULT PRIVILEGES FOR ROLE numo_migration_user`). `DELETE` is never a default: [`db/schema.sql`](db/schema.sql) grants it table by table, only where users can delete rows (today, `labels` and `transactions`), with `GRANT DELETE ON <table> TO :"app_user";` right after the table (`db/init-schema.sh` passes `app_user`).
 
 Connect with `psql` from your machine (e.g. `brew install libpq`); it asks for the password from `.env`:
 
@@ -296,7 +296,7 @@ curl -i -X POST localhost:3000/accounts/$ACCOUNT_ID/unarchive -H "Authorization:
 
 ## Transactions
 
-`POST /transactions` records an income or an expense on one of the caller's accounts, and `GET /transactions` lists them (see [Listing and paging](#listing-and-paging)). Both need a token and the schema applied (`yarn db:schema`). Every transaction moves the account's `balance` in `GET /accounts`.
+`POST /transactions` records an income or an expense on one of the caller's accounts, `GET /transactions` lists them (see [Listing and paging](#listing-and-paging)), and `PUT`/`DELETE /transactions/:id` fix or remove one (see [Editing and deleting](#editing-and-deleting)). All need a token and the schema applied (`yarn db:schema`). Every transaction moves the account's `balance` in `GET /accounts`.
 
 - **`amount`** is signed integer cents and never `0`: **negative is an expense, positive is an income**. `-4590` is −R$ 45.90.
 - **`date`** is a calendar day, `YYYY-MM-DD`, with no time zone (`2026-02-30` is rejected). It's returned exactly as sent.
@@ -354,7 +354,29 @@ done
 | `400`  | `limit` outside 1–100 or not a whole number, a tampered or outdated `cursor`, `from`/`to` not a real `YYYY-MM-DD` day, `accountId` not a UUID, an unexpected parameter |
 | `401`  | Missing, expired or invalid token                                                                                                                                      |
 
-Editing and deleting transactions, transfers and labels on transactions come in later issues.
+### Editing and deleting
+
+`PUT /transactions/:id` replaces a transaction with the **full body** (`{ accountId, date, amount, description }`, every field required), checked with the same rules as recording: the target `accountId` must be one of the caller's accounts and not archived. That means a transaction can be moved off an archived account onto an active one, but not edited while it stays on an archived one. `DELETE /transactions/:id` removes it for good (there is no undo), whether or not its account is archived. Both update the account's `balance` right away. Another user's transaction, an unknown id or an id that isn't a UUID all answer `404`.
+
+```bash
+curl -i -X PUT localhost:3000/transactions/$TRANSACTION_ID -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"accountId\":\"$ACCOUNT_ID\",\"date\":\"2026-11-20\",\"amount\":-5000,\"description\":\"Market\"}"
+# → 200 {"id":"…","accountId":"…","date":"2026-11-20","amount":-5000,"description":"Market"}   (balance moves by -410 from -4590)
+
+curl -i -X DELETE localhost:3000/transactions/$TRANSACTION_ID -H "Authorization: Bearer $TOKEN"
+# → 204, and the balance goes back
+```
+
+| Status | When                                                                                                           |
+| ------ | -------------------------------------------------------------------------------------------------------------- |
+| `200`  | `PUT`: transaction replaced                                                                                    |
+| `204`  | `DELETE`: transaction deleted                                                                                  |
+| `400`  | `PUT`: same body rules as `POST /transactions`, a missing field, or an unexpected one                          |
+| `401`  | Missing, expired or invalid token                                                                              |
+| `404`  | No transaction with that id for the caller (unknown, another user's, or not a UUID); `PUT`: or no such account |
+| `409`  | `PUT`: the target account is archived                                                                          |
+
+Transfers and labels on transactions come in later issues.
 
 ## Labels
 
@@ -535,6 +557,6 @@ src/
 db/                  # Postgres users and schema scripts, and their container init wrappers
 ```
 
-Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase`, `ListAccountsUseCase`, `UpdateAccountUseCase`, `ArchiveAccountUseCase` and `UnarchiveAccountUseCase` (sharing the `findOwnedAccount` helper) in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`. `transactions` has the `TransactionDate`/`TransactionDescription` value objects, `toTransactionAmount`, and the `TransactionRepository` and `AccountLookup` ports in `domain/` (the lookup asks only whether the user owns the account and whether it's archived, so the module doesn't reach into `accounts`); `RecordTransactionUseCase`, `ListTransactionsUseCase`, the `TransactionReader` query port and the page cursor in `application/`; `PgTransactionRepository` (serving both the write and the read port) and `PgAccountLookup` in `infrastructure/`; and the `TransactionsController` with its error mapper in `presentation/`. `labels` too: the `LabelName` and `LabelColor` (palette) value objects and the `LabelRepository` port in `domain/`; `CreateLabelUseCase`, `ListLabelsUseCase`, `UpdateLabelUseCase` and `DeleteLabelUseCase` (sharing `findOwnedLabel`) in `application/`; `PgLabelRepository` in `infrastructure/`; and the `LabelsController` with its error mapper in `presentation/`.
+Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase`, `ListAccountsUseCase`, `UpdateAccountUseCase`, `ArchiveAccountUseCase` and `UnarchiveAccountUseCase` (sharing the `findOwnedAccount` helper) in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`. `transactions` has the `TransactionDate`/`TransactionDescription` value objects, `toTransactionAmount`, and the `TransactionRepository` and `AccountLookup` ports in `domain/` (the lookup asks only whether the user owns the account and whether it's archived, so the module doesn't reach into `accounts`); `RecordTransactionUseCase`, `ListTransactionsUseCase`, `ReplaceTransactionUseCase` and `DeleteTransactionUseCase` (sharing the `findOwnedTransaction` and `ensureAccountAcceptsTransactions` helpers), the `TransactionReader` query port and the page cursor in `application/`; `PgTransactionRepository` (serving both the write and the read port) and `PgAccountLookup` in `infrastructure/`; and the `TransactionsController` with its error mapper in `presentation/`. `labels` too: the `LabelName` and `LabelColor` (palette) value objects and the `LabelRepository` port in `domain/`; `CreateLabelUseCase`, `ListLabelsUseCase`, `UpdateLabelUseCase` and `DeleteLabelUseCase` (sharing `findOwnedLabel`) in `application/`; `PgLabelRepository` in `infrastructure/`; and the `LabelsController` with its error mapper in `presentation/`.
 
 Imports that leave a feature may use the path aliases `@shared/*` and `@modules/*` (set in `tsconfig.json`; `nest build` rewrites them to relative paths in `dist/`). Imports inside a feature stay relative.

@@ -54,3 +54,10 @@ export class InvalidPageCursorError extends Error {
     this.name = 'InvalidPageCursorError';
   }
 }
+
+export class TransactionNotFoundError extends Error {
+  constructor(message: string = 'Transaction not found') {
+    super(message);
+    this.name = 'TransactionNotFoundError';
+  }
+}

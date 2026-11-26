@@ -158,4 +158,70 @@ describe('PgTransactionRepository', () => {
     const [sql] = query.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('user_id = $1 AND (date, id) < ($2::date, $3::uuid)');
   });
+
+  it("should find the user's transaction by id", async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [TRANSACTION_ROW] });
+    const repository = new PgTransactionRepository(poolWithQuery(query));
+
+    // Act
+    const transaction = await repository.findById(USER_ID, TRANSACTION_ROW.id);
+
+    // Assert
+    expect(transaction?.id).toBe(TRANSACTION_ROW.id);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('WHERE id = $1 AND user_id = $2'),
+      [TRANSACTION_ROW.id, USER_ID],
+    );
+  });
+
+  it('should return undefined when no transaction of the user has the id', async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new PgTransactionRepository(poolWithQuery(query));
+
+    // Act
+    const transaction = await repository.findById(USER_ID, TRANSACTION_ROW.id);
+
+    // Assert
+    expect(transaction).toBeUndefined();
+  });
+
+  it("should update every editable field, scoped to the transaction's user", async () => {
+    // Arrange
+    const updatedRow = { ...TRANSACTION_ROW, amount: '-5000' };
+    const query = vi.fn().mockResolvedValue({ rows: [updatedRow] });
+    const repository = new PgTransactionRepository(poolWithQuery(query));
+
+    // Act
+    const transaction = await repository.update({
+      id: TRANSACTION_ROW.id,
+      ...NEW_TRANSACTION,
+      amount: -5000,
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+    });
+
+    // Assert
+    expect(transaction.amount).toBe(-5000);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('WHERE id = $1 AND user_id = $2'),
+      [TRANSACTION_ROW.id, USER_ID, ACCOUNT_ID, '2026-11-20', -5000, 'Market'],
+    );
+  });
+
+  it("should delete only the user's transaction", async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new PgTransactionRepository(poolWithQuery(query));
+
+    // Act
+    await repository.delete(USER_ID, TRANSACTION_ROW.id);
+
+    // Assert
+    expect(query).toHaveBeenCalledWith(
+      'DELETE FROM transactions WHERE id = $1 AND user_id = $2',
+      [TRANSACTION_ROW.id, USER_ID],
+    );
+  });
 });

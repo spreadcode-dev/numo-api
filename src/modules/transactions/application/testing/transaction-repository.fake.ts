@@ -33,11 +33,12 @@ export class InMemoryTransactionRepository
   implements TransactionRepository, TransactionReader
 {
   readonly transactions: Transaction[] = [];
+  private nextSequence = 1;
 
   create(newTransaction: NewTransaction): Promise<Transaction> {
     const now = new Date();
     const transaction: Transaction = {
-      id: fakeId(this.transactions.length + 1),
+      id: fakeId(this.nextSequence++),
       ...newTransaction,
       createdAt: now,
       updatedAt: now,
@@ -52,5 +53,39 @@ export class InMemoryTransactionRepository
       .sort(newestFirst)
       .slice(0, query.limit);
     return Promise.resolve(page);
+  }
+
+  findById(
+    userId: string,
+    transactionId: string,
+  ): Promise<Transaction | undefined> {
+    return Promise.resolve(this.findOwned(userId, transactionId));
+  }
+
+  update(transaction: Transaction): Promise<Transaction> {
+    const updated: Transaction = { ...transaction, updatedAt: new Date() };
+    const index = this.transactions.findIndex(
+      (stored) => stored.id === transaction.id,
+    );
+    this.transactions[index] = updated;
+    return Promise.resolve(updated);
+  }
+
+  delete(userId: string, transactionId: string): Promise<void> {
+    const owned = this.findOwned(userId, transactionId);
+    if (owned) {
+      this.transactions.splice(this.transactions.indexOf(owned), 1);
+    }
+    return Promise.resolve();
+  }
+
+  private findOwned(
+    userId: string,
+    transactionId: string,
+  ): Transaction | undefined {
+    return this.transactions.find(
+      (transaction) =>
+        transaction.userId === userId && transaction.id === transactionId,
+    );
   }
 }

@@ -116,6 +116,45 @@ export class PgTransactionRepository
     return toTransaction(result.rows[0]);
   }
 
+  async findById(
+    userId: string,
+    transactionId: string,
+  ): Promise<Transaction | undefined> {
+    const result = await this.pool.query<TransactionRow>(
+      `SELECT ${TRANSACTION_COLUMNS} FROM transactions
+        WHERE id = $1 AND user_id = $2`,
+      [transactionId, userId],
+    );
+
+    return result.rows.map(toTransaction).at(0);
+  }
+
+  async update(transaction: Transaction): Promise<Transaction> {
+    const result = await this.pool.query<TransactionRow>(
+      `UPDATE transactions
+          SET account_id = $3, date = $4, amount = $5, description = $6,
+              updated_at = now()
+        WHERE id = $1 AND user_id = $2
+        RETURNING ${TRANSACTION_COLUMNS}`,
+      [
+        transaction.id,
+        transaction.userId,
+        transaction.accountId,
+        transaction.date.value,
+        transaction.amount,
+        transaction.description.value,
+      ],
+    );
+    return toTransaction(result.rows[0]);
+  }
+
+  async delete(userId: string, transactionId: string): Promise<void> {
+    await this.pool.query(
+      'DELETE FROM transactions WHERE id = $1 AND user_id = $2',
+      [transactionId, userId],
+    );
+  }
+
   async listPage(query: TransactionPageQuery): Promise<Transaction[]> {
     const where = toWhereClause(filtersFor(query));
     const result = await this.pool.query<TransactionRow>(
