@@ -4,6 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  InvalidPageCursorError,
+  InvalidPageLimitError,
   InvalidTransactionAmountError,
   InvalidTransactionDateError,
   InvalidTransactionDescriptionError,
@@ -15,6 +17,8 @@ const INVALID_INPUT_ERRORS = [
   InvalidTransactionAmountError,
   InvalidTransactionDateError,
   InvalidTransactionDescriptionError,
+  InvalidPageLimitError,
+  InvalidPageCursorError,
 ];
 
 const isInvalidInput = (error: unknown): error is Error =>

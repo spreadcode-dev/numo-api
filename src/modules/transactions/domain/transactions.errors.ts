@@ -38,3 +38,19 @@ export class TransactionAccountArchivedError extends Error {
     this.name = 'TransactionAccountArchivedError';
   }
 }
+
+export class InvalidPageLimitError extends Error {
+  constructor(
+    message: string = 'limit must be a whole number between 1 and 100',
+  ) {
+    super(message);
+    this.name = 'InvalidPageLimitError';
+  }
+}
+
+export class InvalidPageCursorError extends Error {
+  constructor(message: string = 'cursor is not valid; start again without it') {
+    super(message);
+    this.name = 'InvalidPageCursorError';
+  }
+}
