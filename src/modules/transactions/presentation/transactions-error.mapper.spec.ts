@@ -11,6 +11,7 @@ import {
   InvalidTransactionDescriptionError,
   TransactionAccountArchivedError,
   TransactionAccountNotFoundError,
+  TransactionNotFoundError,
 } from '../domain/transactions.errors.js';
 import { toHttpError } from './transactions-error.mapper.js';
 
@@ -18,6 +19,14 @@ describe('toHttpError', () => {
   it('should map a missing account to 404', () => {
     // Act
     const httpError = toHttpError(new TransactionAccountNotFoundError());
+
+    // Assert
+    expect(httpError).toBeInstanceOf(NotFoundException);
+  });
+
+  it('should map a missing transaction to 404', () => {
+    // Act
+    const httpError = toHttpError(new TransactionNotFoundError());
 
     // Assert
     expect(httpError).toBeInstanceOf(NotFoundException);

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
+import { DeleteTransactionUseCase } from './application/delete-transaction.use-case.js';
 import { ListTransactionsUseCase } from './application/list-transactions.use-case.js';
 import { RecordTransactionUseCase } from './application/record-transaction.use-case.js';
+import { ReplaceTransactionUseCase } from './application/replace-transaction.use-case.js';
 import {
   TRANSACTION_READER,
   type TransactionReader,
@@ -35,6 +37,20 @@ import { TransactionsController } from './presentation/transactions.controller.j
       inject: [TRANSACTION_READER],
       useFactory: (transactionReader: TransactionReader) =>
         new ListTransactionsUseCase(transactionReader),
+    },
+    {
+      provide: ReplaceTransactionUseCase,
+      inject: [TRANSACTION_REPOSITORY, ACCOUNT_LOOKUP],
+      useFactory: (
+        transactionRepository: TransactionRepository,
+        accountLookup: AccountLookup,
+      ) => new ReplaceTransactionUseCase(transactionRepository, accountLookup),
+    },
+    {
+      provide: DeleteTransactionUseCase,
+      inject: [TRANSACTION_REPOSITORY],
+      useFactory: (transactionRepository: TransactionRepository) =>
+        new DeleteTransactionUseCase(transactionRepository),
     },
   ],
 })

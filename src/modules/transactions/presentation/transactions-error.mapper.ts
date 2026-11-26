@@ -11,6 +11,7 @@ import {
   InvalidTransactionDescriptionError,
   TransactionAccountArchivedError,
   TransactionAccountNotFoundError,
+  TransactionNotFoundError,
 } from '../domain/transactions.errors.js';
 
 const INVALID_INPUT_ERRORS = [
@@ -25,7 +26,10 @@ const isInvalidInput = (error: unknown): error is Error =>
   INVALID_INPUT_ERRORS.some((invalidInput) => error instanceof invalidInput);
 
 export const toHttpError = (error: unknown): unknown => {
-  if (error instanceof TransactionAccountNotFoundError) {
+  if (
+    error instanceof TransactionNotFoundError ||
+    error instanceof TransactionAccountNotFoundError
+  ) {
     return new NotFoundException(error.message);
   }
 

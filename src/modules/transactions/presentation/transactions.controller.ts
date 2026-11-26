@@ -1,22 +1,50 @@
-import { Body, Controller, Get, Inject, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '@shared/auth/authenticated-request.js';
 import { CurrentUser } from '@shared/auth/current-user.decorator.js';
+import { DeleteTransactionUseCase } from '../application/delete-transaction.use-case.js';
 import { ListTransactionsUseCase } from '../application/list-transactions.use-case.js';
 import { RecordTransactionUseCase } from '../application/record-transaction.use-case.js';
+import { ReplaceTransactionUseCase } from '../application/replace-transaction.use-case.js';
 import { ListTransactionsQueryDto } from './list-transactions.query.dto.js';
 import { RecordTransactionRequestDto } from './record-transaction.request.dto.js';
+import { ReplaceTransactionRequestDto } from './replace-transaction.request.dto.js';
 import { TransactionPageResponseDto } from './transaction-page.response.dto.js';
 import { TransactionResponseDto } from './transaction.response.dto.js';
 import { toHttpError } from './transactions-error.mapper.js';
+
+// A malformed id can't match any transaction, so it gets the same 404 as an
+// unknown one instead of reaching Postgres as an invalid uuid (a 500).
+const TRANSACTION_ID_PIPE = new ParseUUIDPipe({
+  errorHttpStatusCode: HttpStatus.NOT_FOUND,
+});
+
+const INVALID_TRANSACTION =
+  'Amount 0 or not an integer, date not a real YYYY-MM-DD day, description outside 1-140 characters, accountId not a UUID, or unexpected fields';
+const TRANSACTION_NOT_FOUND =
+  'No transaction with this id belongs to the user in the token';
 
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({
@@ -29,13 +57,14 @@ export class TransactionsController {
     private readonly recordTransactionUseCase: RecordTransactionUseCase,
     @Inject(ListTransactionsUseCase)
     private readonly listTransactionsUseCase: ListTransactionsUseCase,
+    @Inject(ReplaceTransactionUseCase)
+    private readonly replaceTransactionUseCase: ReplaceTransactionUseCase,
+    @Inject(DeleteTransactionUseCase)
+    private readonly deleteTransactionUseCase: DeleteTransactionUseCase,
   ) {}
 
   @ApiCreatedResponse({ type: TransactionResponseDto })
-  @ApiBadRequestResponse({
-    description:
-      'Amount 0 or not an integer, date not a real YYYY-MM-DD day, description outside 1-140 characters, accountId not a UUID, or unexpected fields',
-  })
+  @ApiBadRequestResponse({ description: INVALID_TRANSACTION })
   @ApiNotFoundResponse({
     description: 'No account with this id belongs to the user in the token',
   })
@@ -83,6 +112,51 @@ export class TransactionsController {
         cursor: query.cursor,
       });
       return page;
+    } catch (error) {
+      throw toHttpError(error);
+    }
+  }
+
+  @ApiOkResponse({ type: TransactionResponseDto })
+  @ApiBadRequestResponse({ description: INVALID_TRANSACTION })
+  @ApiNotFoundResponse({
+    description: `${TRANSACTION_NOT_FOUND}, or no account with accountId does`,
+  })
+  @ApiConflictResponse({ description: 'The target account is archived' })
+  @Put(':id')
+  async replace(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', TRANSACTION_ID_PIPE) transactionId: string,
+    @Body() body: ReplaceTransactionRequestDto,
+  ): Promise<TransactionResponseDto> {
+    try {
+      const transaction = await this.replaceTransactionUseCase.execute({
+        userId: user.id,
+        transactionId,
+        accountId: body.accountId,
+        date: body.date,
+        amount: body.amount,
+        description: body.description,
+      });
+      return transaction;
+    } catch (error) {
+      throw toHttpError(error);
+    }
+  }
+
+  @ApiNoContentResponse({ description: 'Transaction deleted' })
+  @ApiNotFoundResponse({ description: TRANSACTION_NOT_FOUND })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete(':id')
+  async delete(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', TRANSACTION_ID_PIPE) transactionId: string,
+  ): Promise<void> {
+    try {
+      await this.deleteTransactionUseCase.execute({
+        userId: user.id,
+        transactionId,
+      });
     } catch (error) {
       throw toHttpError(error);
     }

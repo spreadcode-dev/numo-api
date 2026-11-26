@@ -80,3 +80,5 @@ CREATE INDEX IF NOT EXISTS transactions_user_id_date_id_idx
 
 -- Serves the account balance (opening_balance + SUM(amount) per account).
 CREATE INDEX IF NOT EXISTS transactions_account_id_idx ON transactions (account_id);
+
+GRANT DELETE ON transactions TO :"app_user";
