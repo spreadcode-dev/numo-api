@@ -501,6 +501,31 @@ curl -i localhost:3000/reports/net-worth -H "Authorization: Bearer $TOKEN"
 | `200`  | The net worth (`total: 0` and `accounts: []` if no accounts) |
 | `401`  | Missing, expired or invalid token                            |
 
+### Cash flow
+
+`GET /reports/cash-flow` answers the caller's total income and expense for each of the last months, so the dashboard can show whether they spend more than they earn.
+
+- **`months`** (optional, `1`–`24`, default `12`) is how many months to return, ending at **`to`**.
+- **`to`** (optional, `YYYY-MM`) is the last month included. It defaults to the **current month in UTC**, which can differ from the user's local month for a few hours around midnight at the turn of a month, so a client that cares sends `to` from the user's own clock.
+- The answer has **exactly `months` entries**, oldest first. A month without transactions is `{ income: 0, expense: 0 }`.
+- **`income`** is the sum of the month's positive transactions; **`expense`** is the sum of its negative ones, **as a positive number** (ready to chart). Both are integer cents.
+- **[Transfers](#transfers) are left out**, so paying the card bill from checking isn't counted as spending. Transactions on archived accounts still count, since they're history.
+
+```bash
+# November: +500000 salary, -120000 market, -30000 fuel, plus a transfer to the card
+curl -i 'localhost:3000/reports/cash-flow?months=3&to=2026-11' -H "Authorization: Bearer $TOKEN"
+# → 200 [{"month":"2026-09","income":0,"expense":0},{"month":"2026-10","income":0,"expense":0},{"month":"2026-11","income":500000,"expense":150000}]
+
+curl -i localhost:3000/reports/cash-flow -H "Authorization: Bearer $TOKEN"
+# → 200 [ …12 entries, ending at the current UTC month… ]
+```
+
+| Status | When                                                                                                                       |
+| ------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `200`  | One entry per month, oldest first                                                                                          |
+| `400`  | `months` not a whole number between 1 and 24, `to` not a real `YYYY-MM` month (e.g. `2026-13`), or an unexpected parameter |
+| `401`  | Missing, expired or invalid token                                                                                          |
+
 ## Quality checks
 
 | Command             | What it does                                                         |
