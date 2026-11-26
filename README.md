@@ -526,6 +526,32 @@ curl -i localhost:3000/reports/cash-flow -H "Authorization: Bearer $TOKEN"
 | `400`  | `months` not a whole number between 1 and 24, `to` not a real `YYYY-MM` month (e.g. `2026-13`), or an unexpected parameter |
 | `401`  | Missing, expired or invalid token                                                                                          |
 
+### Spending by label
+
+`GET /reports/spending-by-label?month=YYYY-MM` answers how much the caller spent under each [label](#labels) in one month, so they can see where their money goes.
+
+- **`month`** is required.
+- Only **expenses** count: the month's negative transactions, as positive amounts. Income and [transfers](#transfers) are left out.
+- **Labels overlap.** An expense counts **in full under every label it has**: a R$ 300.00 market run tagged both Food and Trip adds `30000` to Food _and_ `30000` to Trip. The entries can therefore add up to more than was spent; **`total`** is the month's real expense, each transaction counted once, so show it apart from the bars rather than summing them.
+- Expenses without labels form one **`Unlabeled`** entry, with no `labelId` and no `color`. It only appears when there is such spending.
+- **`labels`** are sorted by `amount`, highest first (same amount, then by name). A month without expenses is `{ "month": "…", "total": 0, "labels": [] }`.
+
+```bash
+# November: Rent -200000 (Housing), Market -30000 (Food + Trip), parking -5000 (no label)
+curl -i 'localhost:3000/reports/spending-by-label?month=2026-11' -H "Authorization: Bearer $TOKEN"
+# → 200 {"month":"2026-11","total":235000,"labels":[
+#          {"labelId":"…","name":"Housing","color":"#2563eb","amount":200000},
+#          {"labelId":"…","name":"Food","color":"#15803d","amount":30000},
+#          {"labelId":"…","name":"Trip","color":"#f97316","amount":30000},
+#          {"name":"Unlabeled","amount":5000}]}
+```
+
+| Status | When                                                                                       |
+| ------ | ------------------------------------------------------------------------------------------ |
+| `200`  | The month's spending (`total: 0` and `labels: []` if no expenses)                          |
+| `400`  | `month` missing or not a real `YYYY-MM` month (e.g. `2026-13`), or an unexpected parameter |
+| `401`  | Missing, expired or invalid token                                                          |
+
 ## Quality checks
 
 | Command             | What it does                                                         |
