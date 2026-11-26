@@ -1,9 +1,12 @@
+import { TransactionDate } from '../domain/transaction-date.js';
+import { TransactionDescription } from '../domain/transaction-description.js';
 import {
   InvalidTransactionAmountError,
   InvalidTransactionDateError,
   InvalidTransactionDescriptionError,
   TransactionAccountArchivedError,
   TransactionAccountNotFoundError,
+  TransactionIsTransferLegError,
   TransactionNotFoundError,
 } from '../domain/transactions.errors.js';
 import { RecordTransactionUseCase } from './record-transaction.use-case.js';
@@ -175,6 +178,31 @@ describe('ReplaceTransactionUseCase', () => {
     // Assert
     await expect(replace).rejects.toThrow(TransactionNotFoundError);
     expect(transactionRepository.transactions[0].amount).toBe(-4590);
+  });
+
+  it('should refuse to edit one leg of a transfer on its own', async () => {
+    // Arrange
+    const { transactionRepository, replacement, replaceTransaction } =
+      await setUp();
+    const leg = {
+      userId: ANA,
+      date: TransactionDate.create('2026-11-20'),
+      description: TransactionDescription.create('Card bill'),
+    };
+    const { outgoing } = await transactionRepository.createTransfer({
+      outgoing: { ...leg, accountId: ANA_ACCOUNT, amount: -50000 },
+      incoming: { ...leg, accountId: ANA_SAVINGS, amount: 50000 },
+    });
+
+    // Act
+    const replace = replaceTransaction.execute({
+      ...replacement,
+      transactionId: outgoing.id,
+    });
+
+    // Assert
+    await expect(replace).rejects.toThrow(TransactionIsTransferLegError);
+    expect(transactionRepository.transactions[1].amount).toBe(-50000);
   });
 
   it('should reject an unknown transaction', async () => {

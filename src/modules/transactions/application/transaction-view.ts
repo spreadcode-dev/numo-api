@@ -9,6 +9,7 @@ export type TransactionView = {
   amount: Cents;
   description: string;
   labels: TransactionLabel[];
+  transferId?: string;
 };
 
 // Same order as GET /labels: Portuguese, ignoring case and accents.
@@ -29,4 +30,5 @@ export const toTransactionView = (
   amount: transaction.amount,
   description: transaction.description.value,
   labels: sortLabelsByName(labels),
+  transferId: transaction.transferId,
 });

@@ -46,6 +46,7 @@ const TRANSACTION_ID_PIPE = new ParseUUIDPipe({
 
 const INVALID_TRANSACTION =
   'Amount 0 or not an integer, date not a real YYYY-MM-DD day, description outside 1-140 characters, accountId not a UUID, or unexpected fields';
+const TRANSFER_LEG = 'a transfer leg (change it through /transfers)';
 const TRANSACTION_NOT_FOUND =
   'No transaction with this id belongs to the user in the token';
 
@@ -128,7 +129,9 @@ export class TransactionsController {
   @ApiNotFoundResponse({
     description: `${TRANSACTION_NOT_FOUND}, or no account with accountId does`,
   })
-  @ApiConflictResponse({ description: 'The target account is archived' })
+  @ApiConflictResponse({
+    description: `The target account is archived, or ${TRANSFER_LEG}`,
+  })
   @Put(':id')
   async replace(
     @CurrentUser() user: AuthenticatedUser,
@@ -152,6 +155,7 @@ export class TransactionsController {
 
   @ApiNoContentResponse({ description: 'Transaction deleted' })
   @ApiNotFoundResponse({ description: TRANSACTION_NOT_FOUND })
+  @ApiConflictResponse({ description: `The transaction is ${TRANSFER_LEG}` })
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(':id')
   async delete(

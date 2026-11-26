@@ -10,10 +10,14 @@ import {
   InvalidTransactionDateError,
   InvalidTransactionDescriptionError,
   InvalidTransactionLabelsError,
+  InvalidTransferAmountError,
+  SameTransferAccountError,
   TransactionAccountArchivedError,
   TransactionAccountNotFoundError,
+  TransactionIsTransferLegError,
   TransactionLabelNotFoundError,
   TransactionNotFoundError,
+  TransferNotFoundError,
 } from '../domain/transactions.errors.js';
 import { toHttpError } from './transactions-error.mapper.js';
 
@@ -42,6 +46,22 @@ describe('toHttpError', () => {
     expect(httpError).toBeInstanceOf(NotFoundException);
   });
 
+  it('should map a missing transfer to 404', () => {
+    // Act
+    const httpError = toHttpError(new TransferNotFoundError());
+
+    // Assert
+    expect(httpError).toBeInstanceOf(NotFoundException);
+  });
+
+  it('should map a change to a single transfer leg to 409', () => {
+    // Act
+    const httpError = toHttpError(new TransactionIsTransferLegError());
+
+    // Assert
+    expect(httpError).toBeInstanceOf(ConflictException);
+  });
+
   it('should map an archived account to 409', () => {
     // Act
     const httpError = toHttpError(new TransactionAccountArchivedError());
@@ -55,6 +75,8 @@ describe('toHttpError', () => {
     new InvalidTransactionDateError(),
     new InvalidTransactionDescriptionError(),
     new InvalidTransactionLabelsError(),
+    new InvalidTransferAmountError(),
+    new SameTransferAccountError(),
     new InvalidPageLimitError(),
     new InvalidPageCursorError(),
   ])('should map $name to 400 with its message', (error) => {

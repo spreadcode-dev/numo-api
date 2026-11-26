@@ -77,3 +77,37 @@ export class TransactionLabelNotFoundError extends Error {
     this.name = 'TransactionLabelNotFoundError';
   }
 }
+
+export class InvalidTransferAmountError extends Error {
+  constructor(
+    message: string = 'Amount must be a positive whole number of cents within the safe integer range',
+  ) {
+    super(message);
+    this.name = 'InvalidTransferAmountError';
+  }
+}
+
+export class SameTransferAccountError extends Error {
+  constructor(
+    message: string = 'fromAccountId and toAccountId must be different accounts',
+  ) {
+    super(message);
+    this.name = 'SameTransferAccountError';
+  }
+}
+
+export class TransferNotFoundError extends Error {
+  constructor(message: string = 'Transfer not found') {
+    super(message);
+    this.name = 'TransferNotFoundError';
+  }
+}
+
+export class TransactionIsTransferLegError extends Error {
+  constructor(
+    message: string = 'This transaction is a transfer leg; edit or delete it through /transfers',
+  ) {
+    super(message);
+    this.name = 'TransactionIsTransferLegError';
+  }
+}

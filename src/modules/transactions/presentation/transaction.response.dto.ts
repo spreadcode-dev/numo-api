@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { TransactionLabelResponseDto } from './transaction-label.response.dto.js';
 
 export class TransactionResponseDto {
@@ -22,4 +22,11 @@ export class TransactionResponseDto {
     description: 'Always an array, sorted by name ignoring case and accents',
   })
   labels: TransactionLabelResponseDto[];
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Only on the two legs of a transfer; change them through /transfers',
+  })
+  transferId?: string;
 }

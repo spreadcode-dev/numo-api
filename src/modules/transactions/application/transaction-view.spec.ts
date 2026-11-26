@@ -36,6 +36,28 @@ describe('toTransactionView', () => {
       labels: [label('Trip')],
     });
   });
+
+  it('should expose the transfer id of a transfer leg', () => {
+    // Arrange
+    const createdAt = new Date('2026-11-26T12:00:00Z');
+    const leg = {
+      id: 'transaction-2',
+      userId: 'user-ana',
+      accountId: 'account-card',
+      date: TransactionDate.create('2026-11-20'),
+      amount: 50000,
+      description: TransactionDescription.create('Card bill'),
+      transferId: 'transfer-1',
+      createdAt,
+      updatedAt: createdAt,
+    };
+
+    // Act
+    const view = toTransactionView(leg, []);
+
+    // Assert
+    expect(view.transferId).toBe('transfer-1');
+  });
 });
 
 describe('sortLabelsByName', () => {

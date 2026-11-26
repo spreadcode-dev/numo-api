@@ -5,6 +5,8 @@ import type {
   TransactionRepository,
 } from '../../domain/transaction-repository.js';
 import type { Transaction } from '../../domain/transaction.js';
+import type { TransferRepository } from '../../domain/transfer-repository.js';
+import type { Transfer, TransferLegs } from '../../domain/transfer.js';
 import type {
   PagePosition,
   TransactionPageQuery,
@@ -46,26 +48,20 @@ export class InMemoryTransactionRepository
   implements
     TransactionRepository,
     TransactionReader,
-    TransactionLabelRepository
+    TransactionLabelRepository,
+    TransferRepository
 {
   readonly transactions: Transaction[] = [];
   links: Link[] = [];
   private nextSequence = 1;
+  private nextTransfer = 1;
 
   constructor(
     private readonly labelCatalog: InMemoryLabelLookup = new InMemoryLabelLookup(),
   ) {}
 
   create(newTransaction: NewTransaction): Promise<Transaction> {
-    const now = new Date();
-    const transaction: Transaction = {
-      id: fakeId(this.nextSequence++),
-      ...newTransaction,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.transactions.push(transaction);
-    return Promise.resolve(transaction);
+    return Promise.resolve(this.insert(newTransaction));
   }
 
   listPage(query: TransactionPageQuery): Promise<Transaction[]> {
@@ -123,6 +119,44 @@ export class InMemoryTransactionRepository
       }
     }
     return Promise.resolve(labels);
+  }
+
+  createTransfer(legs: TransferLegs): Promise<Transfer> {
+    const transferId = `transfer-${this.nextTransfer++}`;
+    const outgoing = this.insert({ ...legs.outgoing, transferId });
+    const incoming = this.insert({ ...legs.incoming, transferId });
+    return Promise.resolve({ transferId, outgoing, incoming });
+  }
+
+  findTransferLegs(userId: string, transferId: string): Promise<Transaction[]> {
+    return Promise.resolve(this.legsOf(userId, transferId));
+  }
+
+  async deleteTransfer(userId: string, transferId: string): Promise<void> {
+    for (const leg of this.legsOf(userId, transferId)) {
+      await this.delete(userId, leg.id);
+    }
+  }
+
+  private insert(
+    fields: NewTransaction & Pick<Transaction, 'transferId'>,
+  ): Transaction {
+    const now = new Date();
+    const transaction: Transaction = {
+      id: fakeId(this.nextSequence++),
+      ...fields,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.transactions.push(transaction);
+    return transaction;
+  }
+
+  private legsOf(userId: string, transferId: string): Transaction[] {
+    return this.transactions.filter(
+      (transaction) =>
+        transaction.userId === userId && transaction.transferId === transferId,
+    );
   }
 
   private findOwned(

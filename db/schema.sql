@@ -95,3 +95,10 @@ CREATE INDEX IF NOT EXISTS transaction_labels_label_id_idx
     ON transaction_labels (label_id);
 
 GRANT DELETE ON transaction_labels TO :"app_user";
+
+-- The two legs of a transfer share a transfer_id: -amount on the source
+-- account, +amount on the destination. Reports must leave these rows out.
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS transfer_id UUID;
+
+CREATE INDEX IF NOT EXISTS transactions_transfer_id_idx
+    ON transactions (transfer_id) WHERE transfer_id IS NOT NULL;

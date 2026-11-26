@@ -10,10 +10,14 @@ import {
   InvalidTransactionDateError,
   InvalidTransactionDescriptionError,
   InvalidTransactionLabelsError,
+  InvalidTransferAmountError,
+  SameTransferAccountError,
   TransactionAccountArchivedError,
   TransactionAccountNotFoundError,
+  TransactionIsTransferLegError,
   TransactionLabelNotFoundError,
   TransactionNotFoundError,
+  TransferNotFoundError,
 } from '../domain/transactions.errors.js';
 
 const INVALID_INPUT_ERRORS = [
@@ -21,6 +25,8 @@ const INVALID_INPUT_ERRORS = [
   InvalidTransactionDateError,
   InvalidTransactionDescriptionError,
   InvalidTransactionLabelsError,
+  InvalidTransferAmountError,
+  SameTransferAccountError,
   InvalidPageLimitError,
   InvalidPageCursorError,
 ];
@@ -32,12 +38,16 @@ export const toHttpError = (error: unknown): unknown => {
   if (
     error instanceof TransactionNotFoundError ||
     error instanceof TransactionAccountNotFoundError ||
-    error instanceof TransactionLabelNotFoundError
+    error instanceof TransactionLabelNotFoundError ||
+    error instanceof TransferNotFoundError
   ) {
     return new NotFoundException(error.message);
   }
 
-  if (error instanceof TransactionAccountArchivedError) {
+  if (
+    error instanceof TransactionAccountArchivedError ||
+    error instanceof TransactionIsTransferLegError
+  ) {
     return new ConflictException(error.message);
   }
 

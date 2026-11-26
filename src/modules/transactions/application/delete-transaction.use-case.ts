@@ -1,4 +1,5 @@
 import type { TransactionRepository } from '../domain/transaction-repository.js';
+import { ensureNotTransferLeg } from './ensure-not-transfer-leg.js';
 import {
   findOwnedTransaction,
   type TransactionReference,
@@ -8,7 +9,11 @@ export class DeleteTransactionUseCase {
   constructor(private readonly transactionRepository: TransactionRepository) {}
 
   async execute(reference: TransactionReference): Promise<void> {
-    await findOwnedTransaction(this.transactionRepository, reference);
+    const transaction = await findOwnedTransaction(
+      this.transactionRepository,
+      reference,
+    );
+    ensureNotTransferLeg(transaction);
     await this.transactionRepository.delete(
       reference.userId,
       reference.transactionId,
