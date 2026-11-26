@@ -19,6 +19,7 @@ const TRANSACTION_ROW = {
   date: '2026-11-20',
   amount: '-4590',
   description: 'Market',
+  transfer_id: null,
   created_at: CREATED_AT,
   updated_at: CREATED_AT,
 };

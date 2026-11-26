@@ -6,6 +6,7 @@ import type { TransactionLabelRepository } from '../domain/transaction-label-rep
 import type { TransactionRepository } from '../domain/transaction-repository.js';
 import type { Transaction } from '../domain/transaction.js';
 import { ensureAccountAcceptsTransactions } from './ensure-account-accepts-transactions.js';
+import { ensureNotTransferLeg } from './ensure-not-transfer-leg.js';
 import {
   findOwnedTransaction,
   type TransactionReference,
@@ -45,6 +46,7 @@ export class ReplaceTransactionUseCase {
       this.transactionRepository,
       command,
     );
+    ensureNotTransferLeg(transaction);
     // Only the target account is checked, as when recording: a transaction
     // can be moved off an archived account, but not edited while on one.
     await ensureAccountAcceptsTransactions(this.accountLookup, command);

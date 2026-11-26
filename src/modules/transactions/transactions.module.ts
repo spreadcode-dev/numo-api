@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { DeleteTransactionUseCase } from './application/delete-transaction.use-case.js';
+import { DeleteTransferUseCase } from './application/delete-transfer.use-case.js';
 import { ListTransactionsUseCase } from './application/list-transactions.use-case.js';
 import { RecordTransactionUseCase } from './application/record-transaction.use-case.js';
 import { ReplaceTransactionUseCase } from './application/replace-transaction.use-case.js';
 import { SetTransactionLabelsUseCase } from './application/set-transaction-labels.use-case.js';
+import { TransferBetweenAccountsUseCase } from './application/transfer-between-accounts.use-case.js';
 import {
   TRANSACTION_READER,
   type TransactionReader,
@@ -18,14 +20,20 @@ import {
   TRANSACTION_REPOSITORY,
   type TransactionRepository,
 } from './domain/transaction-repository.js';
+import {
+  TRANSFER_REPOSITORY,
+  type TransferRepository,
+} from './domain/transfer-repository.js';
 import { PgAccountLookup } from './infrastructure/pg-account-lookup.js';
 import { PgLabelLookup } from './infrastructure/pg-label-lookup.js';
 import { PgTransactionLabelRepository } from './infrastructure/pg-transaction-label-repository.js';
+import { PgTransferRepository } from './infrastructure/pg-transfer-repository.js';
 import { PgTransactionRepository } from './infrastructure/pg-transaction-repository.js';
 import { TransactionsController } from './presentation/transactions.controller.js';
+import { TransfersController } from './presentation/transfers.controller.js';
 
 @Module({
-  controllers: [TransactionsController],
+  controllers: [TransactionsController, TransfersController],
   providers: [
     PgTransactionRepository,
     // One pg adapter serves both the write port and the read (query) port.
@@ -37,6 +45,7 @@ import { TransactionsController } from './presentation/transactions.controller.j
       provide: TRANSACTION_LABEL_REPOSITORY,
       useClass: PgTransactionLabelRepository,
     },
+    { provide: TRANSFER_REPOSITORY, useClass: PgTransferRepository },
     {
       provide: RecordTransactionUseCase,
       inject: [TRANSACTION_REPOSITORY, ACCOUNT_LOOKUP],
@@ -98,6 +107,21 @@ import { TransactionsController } from './presentation/transactions.controller.j
       inject: [TRANSACTION_REPOSITORY],
       useFactory: (transactionRepository: TransactionRepository) =>
         new DeleteTransactionUseCase(transactionRepository),
+    },
+    {
+      provide: TransferBetweenAccountsUseCase,
+      inject: [TRANSFER_REPOSITORY, ACCOUNT_LOOKUP],
+      useFactory: (
+        transferRepository: TransferRepository,
+        accountLookup: AccountLookup,
+      ) =>
+        new TransferBetweenAccountsUseCase(transferRepository, accountLookup),
+    },
+    {
+      provide: DeleteTransferUseCase,
+      inject: [TRANSFER_REPOSITORY],
+      useFactory: (transferRepository: TransferRepository) =>
+        new DeleteTransferUseCase(transferRepository),
     },
   ],
 })

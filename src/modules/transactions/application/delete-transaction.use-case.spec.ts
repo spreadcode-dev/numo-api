@@ -1,4 +1,9 @@
-import { TransactionNotFoundError } from '../domain/transactions.errors.js';
+import { TransactionDate } from '../domain/transaction-date.js';
+import { TransactionDescription } from '../domain/transaction-description.js';
+import {
+  TransactionIsTransferLegError,
+  TransactionNotFoundError,
+} from '../domain/transactions.errors.js';
 import { DeleteTransactionUseCase } from './delete-transaction.use-case.js';
 import { RecordTransactionUseCase } from './record-transaction.use-case.js';
 import { InMemoryAccountLookup } from './testing/account-lookup.fake.js';
@@ -84,6 +89,30 @@ describe('DeleteTransactionUseCase', () => {
     // Assert
     await expect(remove).rejects.toThrow(TransactionNotFoundError);
     expect(transactionRepository.transactions).toHaveLength(1);
+  });
+
+  it('should refuse to delete one leg of a transfer on its own', async () => {
+    // Arrange
+    const { transactionRepository, deleteTransaction } = await setUp();
+    const leg = {
+      userId: ANA,
+      date: TransactionDate.create('2026-11-20'),
+      description: TransactionDescription.create('Card bill'),
+    };
+    const { incoming } = await transactionRepository.createTransfer({
+      outgoing: { ...leg, accountId: ANA_ACCOUNT, amount: -50000 },
+      incoming: { ...leg, accountId: 'account-ana-card', amount: 50000 },
+    });
+
+    // Act
+    const remove = deleteTransaction.execute({
+      userId: ANA,
+      transactionId: incoming.id,
+    });
+
+    // Assert
+    await expect(remove).rejects.toThrow(TransactionIsTransferLegError);
+    expect(transactionRepository.transactions).toHaveLength(3);
   });
 
   it('should reject an unknown transaction', async () => {

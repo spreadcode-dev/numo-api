@@ -9,6 +9,8 @@ export type Transaction = {
   date: TransactionDate;
   amount: Cents;
   description: TransactionDescription;
+  // Set only on the two legs of a transfer.
+  transferId?: string;
   createdAt: Date;
   updatedAt: Date;
 };
