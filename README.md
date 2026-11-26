@@ -131,6 +131,7 @@ Later changes go at the end of the script as `ALTER ... IF NOT EXISTS` or guarde
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `users`          | `id` (uuid), `email` (unique, case-insensitive), `password_hash` (argon2id), `created_at`, `updated_at`                                                                                                                                                                                             |
 | `refresh_tokens` | `id` (uuid), `user_id` (→ `users`), `family_id` (one per login), `token_hash` (SHA-256 hex, unique), `expires_at`, `revoked_at` (empty while active), `replaced_by_id` (→ the token that rotated it), `created_at`                                                                                  |
+| `transactions`   | `id` (uuid), `user_id` (→ `users`), `account_id` (→ `accounts`), `date` (calendar day, no time zone), `amount` (bigint signed cents, never `0`), `description` (1–140), `created_at`, `updated_at`; indexed on `(user_id, date DESC, id DESC)` and `account_id`                                     |
 | `labels`         | `id` (uuid), `user_id` (→ `users`), `name` (1–30, unique per user, case-insensitive), `color` (`#rrggbb`, lowercase; the palette is checked by the API, not the DB), `created_at`, `updated_at`                                                                                                     |
 | `accounts`       | `id` (uuid), `user_id` (→ `users`), `name` (1–60, unique per user, case-insensitive), `type` (named `CHECK`: `checking`, `savings`, `credit_card`, `cash`, `investment`), `currency` (`BRL` only), `opening_balance` (bigint cents), `archived_at` (empty while active), `created_at`, `updated_at` |
 
@@ -256,9 +257,9 @@ Counters live in memory: they reset when the API restarts and are not shared bet
 - **`type`** is one of `checking`, `savings`, `credit_card`, `cash`, `investment`. A credit card is a plain account whose balance usually goes negative.
 - **`currency`** is optional and must be `BRL` (the default).
 - **`name`** is trimmed, 1–60 characters, and unique per user in any casing.
-- **`balance`** is computed, not stored. For now it equals `openingBalance`.
+- **`balance`** is computed, not stored: `openingBalance` plus the sum of the account's [transactions](#transactions).
 - **`archivedAt`** appears only on archived accounts. Accounts are never deleted (the app's database user has no `DELETE` grant): archiving hides an account from the default list but keeps it, and its history, in place. Archiving or unarchiving twice is harmless and keeps the first archive date.
-- **Editing `openingBalance` is a correction**, not a transaction: the balance is computed from it, so it changes too. `currency` can't be edited (`400`).
+- **Editing `openingBalance` is a correction**, not a transaction: the balance is computed from it, so it changes by the same amount. `currency` can't be edited (`400`).
 
 ```bash
 curl -i -X POST localhost:3000/accounts -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
@@ -292,6 +293,34 @@ curl -i -X POST localhost:3000/accounts/$ACCOUNT_ID/unarchive -H "Authorization:
 | `401`  | Missing, expired or invalid token                                                                                                                                                                                                    |
 | `404`  | `PATCH`, `archive`, `unarchive`: no account with that id for the caller (unknown, another user's, or not a UUID)                                                                                                                     |
 | `409`  | `POST`, `PATCH`: the user already has another account with that name (any casing)                                                                                                                                                    |
+
+## Transactions
+
+`POST /transactions` records an income or an expense on one of the caller's accounts. It needs a token and the schema applied (`yarn db:schema`). Every transaction moves the account's `balance` in `GET /accounts`.
+
+- **`amount`** is signed integer cents and never `0`: **negative is an expense, positive is an income**. `-4590` is −R$ 45.90.
+- **`date`** is a calendar day, `YYYY-MM-DD`, with no time zone (`2026-02-30` is rejected). It's returned exactly as sent.
+- **`description`** is trimmed and 1–140 characters.
+- **`accountId`** must be one of the caller's accounts and not archived. Unarchive an account to record on it again.
+
+```bash
+curl -i -X POST localhost:3000/transactions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"accountId\":\"$ACCOUNT_ID\",\"date\":\"2026-11-20\",\"amount\":-4590,\"description\":\"Market\"}"
+# → 201 {"id":"…","accountId":"…","date":"2026-11-20","amount":-4590,"description":"Market"}
+
+curl -i localhost:3000/accounts -H "Authorization: Bearer $TOKEN"
+# → 200 [{"id":"…",…,"openingBalance":100000,"balance":95410}]
+```
+
+| Status | When                                                                                                                                                         |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `201`  | Transaction recorded                                                                                                                                         |
+| `400`  | `amount` is `0` or not an integer, `date` isn't a real `YYYY-MM-DD` day, `description` outside 1–140 characters, `accountId` not a UUID, an unexpected field |
+| `401`  | Missing, expired or invalid token                                                                                                                            |
+| `404`  | No account with that id for the caller (unknown or another user's)                                                                                           |
+| `409`  | The account is archived                                                                                                                                      |
+
+Listing, editing and deleting transactions, transfers and labels on transactions come in later issues.
 
 ## Labels
 
@@ -472,6 +501,6 @@ src/
 db/                  # Postgres users and schema scripts, and their container init wrappers
 ```
 
-Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase`, `ListAccountsUseCase`, `UpdateAccountUseCase`, `ArchiveAccountUseCase` and `UnarchiveAccountUseCase` (sharing the `findOwnedAccount` helper) in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`. `labels` too: the `LabelName` and `LabelColor` (palette) value objects and the `LabelRepository` port in `domain/`; `CreateLabelUseCase`, `ListLabelsUseCase`, `UpdateLabelUseCase` and `DeleteLabelUseCase` (sharing `findOwnedLabel`) in `application/`; `PgLabelRepository` in `infrastructure/`; and the `LabelsController` with its error mapper in `presentation/`.
+Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase`, `ListAccountsUseCase`, `UpdateAccountUseCase`, `ArchiveAccountUseCase` and `UnarchiveAccountUseCase` (sharing the `findOwnedAccount` helper) in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`. `transactions` has the `TransactionDate`/`TransactionDescription` value objects, `toTransactionAmount`, and the `TransactionRepository` and `AccountLookup` ports in `domain/` (the lookup asks only whether the user owns the account and whether it's archived, so the module doesn't reach into `accounts`); `RecordTransactionUseCase` in `application/`; `PgTransactionRepository` and `PgAccountLookup` in `infrastructure/`; and the `TransactionsController` with its error mapper in `presentation/`. `labels` too: the `LabelName` and `LabelColor` (palette) value objects and the `LabelRepository` port in `domain/`; `CreateLabelUseCase`, `ListLabelsUseCase`, `UpdateLabelUseCase` and `DeleteLabelUseCase` (sharing `findOwnedLabel`) in `application/`; `PgLabelRepository` in `infrastructure/`; and the `LabelsController` with its error mapper in `presentation/`.
 
 Imports that leave a feature may use the path aliases `@shared/*` and `@modules/*` (set in `tsconfig.json`; `nest build` rewrites them to relative paths in `dist/`). Imports inside a feature stay relative.

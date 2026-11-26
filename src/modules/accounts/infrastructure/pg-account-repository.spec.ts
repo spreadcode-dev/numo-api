@@ -20,6 +20,7 @@ const ACCOUNT_ROW = {
   type: 'credit_card',
   currency: 'BRL',
   opening_balance: '-150000',
+  transactions_total: '0',
   archived_at: null,
   created_at: CREATED_AT,
   updated_at: CREATED_AT,
@@ -36,6 +37,7 @@ const NEW_ACCOUNT = {
 const ACCOUNT = {
   id: ACCOUNT_ROW.id,
   ...NEW_ACCOUNT,
+  transactionsTotal: 0,
   archivedAt: undefined,
   createdAt: CREATED_AT,
   updatedAt: CREATED_AT,
@@ -126,6 +128,24 @@ describe('PgAccountRepository', () => {
     expect(accounts).toEqual([ACCOUNT]);
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining('WHERE user_id = $1'),
+      [USER_ID],
+    );
+  });
+
+  it('should read the sum of the account transactions as cents', async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({
+      rows: [{ ...ACCOUNT_ROW, transactions_total: '-4590' }],
+    });
+    const repository = new PgAccountRepository(poolWithQuery(query));
+
+    // Act
+    const [account] = await repository.listByUser(USER_ID);
+
+    // Assert
+    expect(account.transactionsTotal).toBe(-4590);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('SUM(t.amount) FROM transactions t'),
       [USER_ID],
     );
   });

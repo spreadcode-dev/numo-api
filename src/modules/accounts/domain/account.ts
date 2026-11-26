@@ -10,6 +10,8 @@ export type Account = {
   type: AccountType;
   currency: Currency;
   openingBalance: Cents;
+  // Sum of the account's transaction amounts; 0 when it has none.
+  transactionsTotal: Cents;
   archivedAt?: Date;
   createdAt: Date;
   updatedAt: Date;

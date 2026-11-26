@@ -61,3 +61,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS labels_user_id_name_lower_key
 
 -- DELETE is granted per table, only where users may delete rows (least privilege).
 GRANT DELETE ON labels TO :"app_user";
+
+-- amount is signed integer cents: negative is an expense, positive an income.
+-- date is a calendar day with no time zone.
+CREATE TABLE IF NOT EXISTS transactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users (id),
+    account_id UUID NOT NULL REFERENCES accounts (id),
+    date DATE NOT NULL,
+    amount BIGINT NOT NULL CONSTRAINT transactions_amount_check CHECK (amount <> 0),
+    description VARCHAR(140) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS transactions_user_id_date_id_idx
+    ON transactions (user_id, date DESC, id DESC);
+
+-- Serves the account balance (opening_balance + SUM(amount) per account).
+CREATE INDEX IF NOT EXISTS transactions_account_id_idx ON transactions (account_id);
