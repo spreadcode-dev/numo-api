@@ -7,4 +7,5 @@ set -euo pipefail
 psql -v ON_ERROR_STOP=1 \
     --username "$DB_MIGRATION_USER" \
     --dbname "$POSTGRES_DB" \
+    -v app_user="$DB_APP_USER" \
     -f /db/schema.sql

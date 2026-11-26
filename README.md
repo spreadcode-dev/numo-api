@@ -87,13 +87,13 @@ Postgres 17 runs locally in a container ([`docker-compose.yml`](docker-compose.y
 
 ### Users (least privilege)
 
-| Role                  | Used by                          | Can                                               |
-| --------------------- | -------------------------------- | ------------------------------------------------- |
-| `numo_superuser`      | Setup and emergencies only       | Everything (owns the container and `numo_db`)     |
-| `numo_migration_user` | Schema script (`yarn db:schema`) | DDL on schema `public`                            |
-| `numo_app_user`       | The API at runtime, and only it  | `SELECT`, `INSERT`, `UPDATE`; no `DELETE`, no DDL |
+| Role                  | Used by                          | Can                                                             |
+| --------------------- | -------------------------------- | --------------------------------------------------------------- |
+| `numo_superuser`      | Setup and emergencies only       | Everything (owns the container and `numo_db`)                   |
+| `numo_migration_user` | Schema script (`yarn db:schema`) | DDL on schema `public`                                          |
+| `numo_app_user`       | The API at runtime, and only it  | `SELECT`, `INSERT`, `UPDATE`; `DELETE` only on `labels`; no DDL |
 
-[`db/users.sql`](db/users.sql) creates the roles and grants. It runs automatically on the container's **first boot** (empty volume) through [`db/init-users.sh`](db/init-users.sh), with passwords from `.env`. After changing the script or a password, run `yarn db:users` (or `docker compose down -v && docker compose up -d` to start from scratch). Tables created by `numo_migration_user` are automatically readable and writable by `numo_app_user` (`ALTER DEFAULT PRIVILEGES FOR ROLE numo_migration_user`).
+[`db/users.sql`](db/users.sql) creates the roles and grants. It runs automatically on the container's **first boot** (empty volume) through [`db/init-users.sh`](db/init-users.sh), with passwords from `.env`. After changing the script or a password, run `yarn db:users` (or `docker compose down -v && docker compose up -d` to start from scratch). Tables created by `numo_migration_user` are automatically readable and writable by `numo_app_user` (`ALTER DEFAULT PRIVILEGES FOR ROLE numo_migration_user`). `DELETE` is never a default: [`db/schema.sql`](db/schema.sql) grants it table by table, only where users can delete rows (today, `labels`).
 
 Connect with `psql` from your machine (e.g. `brew install libpq`); it asks for the password from `.env`:
 
@@ -131,6 +131,7 @@ Later changes go at the end of the script as `ALTER ... IF NOT EXISTS` or guarde
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `users`          | `id` (uuid), `email` (unique, case-insensitive), `password_hash` (argon2id), `created_at`, `updated_at`                                                                                                                                                                                             |
 | `refresh_tokens` | `id` (uuid), `user_id` (→ `users`), `family_id` (one per login), `token_hash` (SHA-256 hex, unique), `expires_at`, `revoked_at` (empty while active), `replaced_by_id` (→ the token that rotated it), `created_at`                                                                                  |
+| `labels`         | `id` (uuid), `user_id` (→ `users`), `name` (1–30, unique per user, case-insensitive), `color` (`#rrggbb`, lowercase; the palette is checked by the API, not the DB), `created_at`, `updated_at`                                                                                                     |
 | `accounts`       | `id` (uuid), `user_id` (→ `users`), `name` (1–60, unique per user, case-insensitive), `type` (named `CHECK`: `checking`, `savings`, `credit_card`, `cash`, `investment`), `currency` (`BRL` only), `opening_balance` (bigint cents), `archived_at` (empty while active), `created_at`, `updated_at` |
 
 ### API connection
@@ -292,6 +293,52 @@ curl -i -X POST localhost:3000/accounts/$ACCOUNT_ID/unarchive -H "Authorization:
 | `404`  | `PATCH`, `archive`, `unarchive`: no account with that id for the caller (unknown, another user's, or not a UUID)                                                                                                                     |
 | `409`  | `POST`, `PATCH`: the user already has another account with that name (any casing)                                                                                                                                                    |
 
+## Labels
+
+Labels are NuMo's only way to classify transactions (there are no separate categories). `POST /labels` creates one from `{ name, color }`, `GET /labels` lists the caller's labels sorted by name (ignoring case and accents), `PATCH /labels/:id` renames and/or recolors one, and `DELETE /labels/:id` removes it. New users have no labels. All need a token and are scoped to its user: another user's labels answer `404`, like unknown ones. They need the schema applied (`yarn db:schema`).
+
+- **`name`** is trimmed, 1–30 characters, and unique per user in any casing.
+- **`color`** must be one of the 8 palette colors shared with numo-web. Any casing is accepted; it's stored and returned in lowercase.
+
+| Color  | Hex       |
+| ------ | --------- |
+| blue   | `#2563eb` |
+| green  | `#15803d` |
+| teal   | `#0f766e` |
+| purple | `#7c3aed` |
+| pink   | `#be185d` |
+| red    | `#b91c1c` |
+| orange | `#f97316` |
+| yellow | `#facc15` |
+
+```bash
+curl -i -X POST localhost:3000/labels -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Groceries","color":"#15803D"}'
+# → 201 {"id":"…","name":"Groceries","color":"#15803d"}
+
+curl -i localhost:3000/labels -H "Authorization: Bearer $TOKEN"
+# → 200 [{"id":"…","name":"Groceries","color":"#15803d"}]
+
+curl -i -X PATCH localhost:3000/labels/$LABEL_ID -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Supermarket","color":"#f97316"}'
+# → 200 {"id":"…","name":"Supermarket","color":"#f97316"}
+
+curl -i -X DELETE localhost:3000/labels/$LABEL_ID -H "Authorization: Bearer $TOKEN"
+# → 204
+```
+
+`LABEL_ID` is the `id` returned by `POST /labels`.
+
+| Status | When                                                                                                              |
+| ------ | ----------------------------------------------------------------------------------------------------------------- |
+| `201`  | `POST`: label created                                                                                             |
+| `200`  | `GET`: the caller's labels (`[]` if none); `PATCH`: the edited label                                              |
+| `204`  | `DELETE`: label deleted                                                                                           |
+| `400`  | Name empty or over 30 characters, color outside the palette or not `#RRGGBB`, a `null` field, an unexpected field |
+| `401`  | Missing, expired or invalid token                                                                                 |
+| `404`  | `PATCH`, `DELETE`: no label with that id for the caller (unknown, another user's, or not a UUID)                  |
+| `409`  | `POST`, `PATCH`: the user already has another label with that name (any casing)                                   |
+
 ## Quality checks
 
 | Command             | What it does                                                         |
@@ -425,6 +472,6 @@ src/
 db/                  # Postgres users and schema scripts, and their container init wrappers
 ```
 
-Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase`, `ListAccountsUseCase`, `UpdateAccountUseCase`, `ArchiveAccountUseCase` and `UnarchiveAccountUseCase` (sharing the `findOwnedAccount` helper) in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`.
+Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase`, `ListAccountsUseCase`, `UpdateAccountUseCase`, `ArchiveAccountUseCase` and `UnarchiveAccountUseCase` (sharing the `findOwnedAccount` helper) in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`. `labels` too: the `LabelName` and `LabelColor` (palette) value objects and the `LabelRepository` port in `domain/`; `CreateLabelUseCase`, `ListLabelsUseCase`, `UpdateLabelUseCase` and `DeleteLabelUseCase` (sharing `findOwnedLabel`) in `application/`; `PgLabelRepository` in `infrastructure/`; and the `LabelsController` with its error mapper in `presentation/`.
 
 Imports that leave a feature may use the path aliases `@shared/*` and `@modules/*` (set in `tsconfig.json`; `nest build` rewrites them to relative paths in `dist/`). Imports inside a feature stay relative.
