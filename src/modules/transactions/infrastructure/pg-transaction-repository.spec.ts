@@ -83,4 +83,79 @@ describe('PgTransactionRepository', () => {
     // Assert
     await expect(create).rejects.toThrow(InvalidTransactionAmountError);
   });
+
+  it("should list a page of the user's transactions, newest first", async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [TRANSACTION_ROW] });
+    const repository = new PgTransactionRepository(poolWithQuery(query));
+
+    // Act
+    const transactions = await repository.listPage({
+      userId: USER_ID,
+      limit: 51,
+    });
+
+    // Assert
+    expect(transactions).toHaveLength(1);
+    const [sql, params] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('WHERE user_id = $1');
+    expect(sql).toContain('ORDER BY date DESC, id DESC');
+    expect(sql).toContain('LIMIT $2');
+    expect(params).toEqual([USER_ID, 51]);
+  });
+
+  it('should add only the filters that were sent, in placeholder order', async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new PgTransactionRepository(poolWithQuery(query));
+
+    // Act
+    await repository.listPage({
+      userId: USER_ID,
+      accountId: ACCOUNT_ID,
+      from: TransactionDate.create('2026-11-01'),
+      to: TransactionDate.create('2026-11-30'),
+      after: {
+        date: TransactionDate.create('2026-11-20'),
+        id: TRANSACTION_ROW.id,
+      },
+      limit: 21,
+    });
+
+    // Assert
+    const [sql, params] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain(
+      'user_id = $1 AND account_id = $2 AND date >= $3::date AND date <= $4::date AND (date, id) < ($5::date, $6::uuid)',
+    );
+    expect(sql).toContain('LIMIT $7');
+    expect(params).toEqual([
+      USER_ID,
+      ACCOUNT_ID,
+      '2026-11-01',
+      '2026-11-30',
+      '2026-11-20',
+      TRANSACTION_ROW.id,
+      21,
+    ]);
+  });
+
+  it('should page by position alone when only a cursor is sent', async () => {
+    // Arrange
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const repository = new PgTransactionRepository(poolWithQuery(query));
+
+    // Act
+    await repository.listPage({
+      userId: USER_ID,
+      after: {
+        date: TransactionDate.create('2026-11-20'),
+        id: TRANSACTION_ROW.id,
+      },
+      limit: 51,
+    });
+
+    // Assert
+    const [sql] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('user_id = $1 AND (date, id) < ($2::date, $3::uuid)');
+  });
 });

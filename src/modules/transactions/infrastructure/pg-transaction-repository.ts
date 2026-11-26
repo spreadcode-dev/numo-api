@@ -1,6 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PG_POOL } from '@shared/database/database.tokens.js';
 import type { Pool } from 'pg';
+import type {
+  TransactionPageQuery,
+  TransactionReader,
+} from '../application/transaction-reader.js';
 import { toTransactionAmount } from '../domain/transaction-amount.js';
 import { TransactionDate } from '../domain/transaction-date.js';
 import { TransactionDescription } from '../domain/transaction-description.js';
@@ -39,8 +43,61 @@ const toTransaction = (row: TransactionRow): Transaction => ({
   updatedAt: row.updated_at,
 });
 
+type Filter = {
+  condition: (...placeholders: string[]) => string;
+  values: unknown[];
+};
+
+// Only the filters actually sent become SQL, so the planner always sees plain
+// conditions it can match against the (user_id, date DESC, id DESC) index.
+const filtersFor = (query: TransactionPageQuery): Filter[] => {
+  const filters: Filter[] = [
+    { condition: (userId) => `user_id = ${userId}`, values: [query.userId] },
+  ];
+  if (query.accountId !== undefined) {
+    filters.push({
+      condition: (accountId) => `account_id = ${accountId}`,
+      values: [query.accountId],
+    });
+  }
+  if (query.from) {
+    filters.push({
+      condition: (from) => `date >= ${from}::date`,
+      values: [query.from.value],
+    });
+  }
+  if (query.to) {
+    filters.push({
+      condition: (to) => `date <= ${to}::date`,
+      values: [query.to.value],
+    });
+  }
+  if (query.after) {
+    filters.push({
+      condition: (date, id) => `(date, id) < (${date}::date, ${id}::uuid)`,
+      values: [query.after.date.value, query.after.id],
+    });
+  }
+  return filters;
+};
+
+// Numbers the placeholders ($1, $2, ...) in the order the values are pushed.
+const toWhereClause = (filters: Filter[]) => {
+  const params: unknown[] = [];
+  const conditions = filters.map((filter) => {
+    const placeholders = filter.values.map((value) => {
+      params.push(value);
+      return `$${params.length}`;
+    });
+    return filter.condition(...placeholders);
+  });
+  return { sql: conditions.join(' AND '), params };
+};
+
 @Injectable()
-export class PgTransactionRepository implements TransactionRepository {
+export class PgTransactionRepository
+  implements TransactionRepository, TransactionReader
+{
   constructor(@Inject(PG_POOL) private readonly pool: Pick<Pool, 'query'>) {}
 
   async create(newTransaction: NewTransaction): Promise<Transaction> {
@@ -57,5 +114,18 @@ export class PgTransactionRepository implements TransactionRepository {
       ],
     );
     return toTransaction(result.rows[0]);
+  }
+
+  async listPage(query: TransactionPageQuery): Promise<Transaction[]> {
+    const where = toWhereClause(filtersFor(query));
+    const result = await this.pool.query<TransactionRow>(
+      `SELECT ${TRANSACTION_COLUMNS} FROM transactions
+        WHERE ${where.sql}
+        ORDER BY date DESC, id DESC
+        LIMIT $${where.params.length + 1}`,
+      [...where.params, query.limit],
+    );
+
+    return result.rows.map(toTransaction);
   }
 }

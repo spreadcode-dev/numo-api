@@ -1,5 +1,10 @@
 import { Module } from '@nestjs/common';
+import { ListTransactionsUseCase } from './application/list-transactions.use-case.js';
 import { RecordTransactionUseCase } from './application/record-transaction.use-case.js';
+import {
+  TRANSACTION_READER,
+  type TransactionReader,
+} from './application/transaction-reader.js';
 import { ACCOUNT_LOOKUP, type AccountLookup } from './domain/account-lookup.js';
 import {
   TRANSACTION_REPOSITORY,
@@ -12,7 +17,10 @@ import { TransactionsController } from './presentation/transactions.controller.j
 @Module({
   controllers: [TransactionsController],
   providers: [
-    { provide: TRANSACTION_REPOSITORY, useClass: PgTransactionRepository },
+    PgTransactionRepository,
+    // One pg adapter serves both the write port and the read (query) port.
+    { provide: TRANSACTION_REPOSITORY, useExisting: PgTransactionRepository },
+    { provide: TRANSACTION_READER, useExisting: PgTransactionRepository },
     { provide: ACCOUNT_LOOKUP, useClass: PgAccountLookup },
     {
       provide: RecordTransactionUseCase,
@@ -21,6 +29,12 @@ import { TransactionsController } from './presentation/transactions.controller.j
         transactionRepository: TransactionRepository,
         accountLookup: AccountLookup,
       ) => new RecordTransactionUseCase(transactionRepository, accountLookup),
+    },
+    {
+      provide: ListTransactionsUseCase,
+      inject: [TRANSACTION_READER],
+      useFactory: (transactionReader: TransactionReader) =>
+        new ListTransactionsUseCase(transactionReader),
     },
   ],
 })

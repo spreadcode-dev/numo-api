@@ -4,6 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  InvalidPageCursorError,
+  InvalidPageLimitError,
   InvalidTransactionAmountError,
   InvalidTransactionDateError,
   InvalidTransactionDescriptionError,
@@ -33,6 +35,8 @@ describe('toHttpError', () => {
     new InvalidTransactionAmountError(),
     new InvalidTransactionDateError(),
     new InvalidTransactionDescriptionError(),
+    new InvalidPageLimitError(),
+    new InvalidPageCursorError(),
   ])('should map $name to 400 with its message', (error) => {
     // Act
     const httpError = toHttpError(error);

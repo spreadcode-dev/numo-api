@@ -296,7 +296,7 @@ curl -i -X POST localhost:3000/accounts/$ACCOUNT_ID/unarchive -H "Authorization:
 
 ## Transactions
 
-`POST /transactions` records an income or an expense on one of the caller's accounts. It needs a token and the schema applied (`yarn db:schema`). Every transaction moves the account's `balance` in `GET /accounts`.
+`POST /transactions` records an income or an expense on one of the caller's accounts, and `GET /transactions` lists them (see [Listing and paging](#listing-and-paging)). Both need a token and the schema applied (`yarn db:schema`). Every transaction moves the account's `balance` in `GET /accounts`.
 
 - **`amount`** is signed integer cents and never `0`: **negative is an expense, positive is an income**. `-4590` is −R$ 45.90.
 - **`date`** is a calendar day, `YYYY-MM-DD`, with no time zone (`2026-02-30` is rejected). It's returned exactly as sent.
@@ -320,7 +320,41 @@ curl -i localhost:3000/accounts -H "Authorization: Bearer $TOKEN"
 | `404`  | No account with that id for the caller (unknown or another user's)                                                                                           |
 | `409`  | The account is archived                                                                                                                                      |
 
-Listing, editing and deleting transactions, transfers and labels on transactions come in later issues.
+### Listing and paging
+
+`GET /transactions` lists the caller's transactions **newest first** (by `date`, then `id` to break ties). Every filter is optional and they combine with AND:
+
+| Parameter   | What it does                                                                                  |
+| ----------- | --------------------------------------------------------------------------------------------- |
+| `accountId` | Only that account's transactions. Another user's account gives `{"items":[]}`, never an error |
+| `from`      | First day included, `YYYY-MM-DD`                                                              |
+| `to`        | Last day included, `YYYY-MM-DD`                                                               |
+| `limit`     | Page size, 1–100 (default `50`)                                                               |
+| `cursor`    | The `nextCursor` of the previous page, passed back unchanged                                  |
+
+The response is `{ "items": [...], "nextCursor": "…" }`. `nextCursor` is **absent on the last page**. Paging is keyset-based, not `OFFSET`: the cursor is an opaque, versioned encoding of the last row's `(date, id)`, so pages stay stable when transactions are added meanwhile, and it uses the `(user_id, date DESC, id DESC)` index. Keep the same filters while following a cursor.
+
+```bash
+curl -s 'localhost:3000/transactions?from=2026-11-01&to=2026-11-30&limit=20' -H "Authorization: Bearer $TOKEN"
+# → 200 {"items":[{"id":"…","accountId":"…","date":"2026-11-20","amount":-4590,"description":"Market"},…],"nextCursor":"djF8…"}
+
+# Follow every page (needs jq)
+CURSOR=''
+while :; do
+  PAGE=$(curl -s "localhost:3000/transactions?limit=50${CURSOR:+&cursor=$CURSOR}" -H "Authorization: Bearer $TOKEN")
+  echo "$PAGE" | jq -c '.items[]'
+  CURSOR=$(echo "$PAGE" | jq -r '.nextCursor // empty')
+  [ -z "$CURSOR" ] && break
+done
+```
+
+| Status | When                                                                                                                                                                   |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `200`  | A page of the caller's transactions (`{"items":[]}` if none match)                                                                                                     |
+| `400`  | `limit` outside 1–100 or not a whole number, a tampered or outdated `cursor`, `from`/`to` not a real `YYYY-MM-DD` day, `accountId` not a UUID, an unexpected parameter |
+| `401`  | Missing, expired or invalid token                                                                                                                                      |
+
+Editing and deleting transactions, transfers and labels on transactions come in later issues.
 
 ## Labels
 
@@ -501,6 +535,6 @@ src/
 db/                  # Postgres users and schema scripts, and their container init wrappers
 ```
 
-Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase`, `ListAccountsUseCase`, `UpdateAccountUseCase`, `ArchiveAccountUseCase` and `UnarchiveAccountUseCase` (sharing the `findOwnedAccount` helper) in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`. `transactions` has the `TransactionDate`/`TransactionDescription` value objects, `toTransactionAmount`, and the `TransactionRepository` and `AccountLookup` ports in `domain/` (the lookup asks only whether the user owns the account and whether it's archived, so the module doesn't reach into `accounts`); `RecordTransactionUseCase` in `application/`; `PgTransactionRepository` and `PgAccountLookup` in `infrastructure/`; and the `TransactionsController` with its error mapper in `presentation/`. `labels` too: the `LabelName` and `LabelColor` (palette) value objects and the `LabelRepository` port in `domain/`; `CreateLabelUseCase`, `ListLabelsUseCase`, `UpdateLabelUseCase` and `DeleteLabelUseCase` (sharing `findOwnedLabel`) in `application/`; `PgLabelRepository` in `infrastructure/`; and the `LabelsController` with its error mapper in `presentation/`.
+Dependencies point inward: presentation/infrastructure → application → domain. A feature only creates the layers it needs (`health` has no `domain/`: its `DatabaseHealthIndicator` port lives in `application/` and the `pg` adapter in `infrastructure/`). `auth` uses all four: `Email`/`Password` value objects, refresh-token rules and the `UserRepository`/`PasswordHasher`/`AccessTokenIssuer`/`AccessTokenVerifier`/`RefreshTokenRepository`/`RefreshTokenGenerator`/`Clock` ports in `domain/`; `RegisterUserUseCase`, `LoginUseCase`, `GetCurrentUserUseCase`, `RefreshSessionUseCase` and `LogoutUseCase`, plus the `RefreshTokens` and `SessionIssuer` helpers they share, in `application/` (plain classes, built by factories in `auth.module.ts`); the `pg` repositories, argon2 hasher, JWT adapter, crypto token generator and system clock in `infrastructure/`; and the `AuthController` (account) and `SessionController` (login, refresh, logout), refresh-token cookie helpers, error mapper, global `JwtAuthGuard` and the `@AuthRateLimited()` decorator with its throttling config in `presentation/`. `accounts` follows the same shape: the `AccountName` value object, `AccountType`, `Currency`, cents (`toCents`) and the `AccountRepository` port in `domain/`; `CreateAccountUseCase`, `ListAccountsUseCase`, `UpdateAccountUseCase`, `ArchiveAccountUseCase` and `UnarchiveAccountUseCase` (sharing the `findOwnedAccount` helper) in `application/`; `PgAccountRepository` in `infrastructure/`; and the `AccountsController` with its error mapper in `presentation/`. `transactions` has the `TransactionDate`/`TransactionDescription` value objects, `toTransactionAmount`, and the `TransactionRepository` and `AccountLookup` ports in `domain/` (the lookup asks only whether the user owns the account and whether it's archived, so the module doesn't reach into `accounts`); `RecordTransactionUseCase`, `ListTransactionsUseCase`, the `TransactionReader` query port and the page cursor in `application/`; `PgTransactionRepository` (serving both the write and the read port) and `PgAccountLookup` in `infrastructure/`; and the `TransactionsController` with its error mapper in `presentation/`. `labels` too: the `LabelName` and `LabelColor` (palette) value objects and the `LabelRepository` port in `domain/`; `CreateLabelUseCase`, `ListLabelsUseCase`, `UpdateLabelUseCase` and `DeleteLabelUseCase` (sharing `findOwnedLabel`) in `application/`; `PgLabelRepository` in `infrastructure/`; and the `LabelsController` with its error mapper in `presentation/`.
 
 Imports that leave a feature may use the path aliases `@shared/*` and `@modules/*` (set in `tsconfig.json`; `nest build` rewrites them to relative paths in `dist/`). Imports inside a feature stay relative.
