@@ -2,6 +2,7 @@
 -- Runs as the migration user (see db/init-schema.sh) so the default
 -- privileges from db/users.sql give the app user access to new tables.
 -- Later changes go below as ALTER ... IF NOT EXISTS or guarded DO $$ blocks.
+-- Required psql variable: app_user (see db/init-schema.sh), for per-table grants.
 
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -42,3 +43,21 @@ CREATE TABLE IF NOT EXISTS accounts (
 
 CREATE UNIQUE INDEX IF NOT EXISTS accounts_user_id_name_lower_key
     ON accounts (user_id, lower(name));
+
+-- Only the format is checked here: the palette lives in the API (LabelColor),
+-- so changing it needs no schema change.
+CREATE TABLE IF NOT EXISTS labels (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users (id),
+    name VARCHAR(30) NOT NULL,
+    color CHAR(7) NOT NULL CONSTRAINT labels_color_check
+        CHECK (color ~ '^#[0-9a-f]{6}$'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS labels_user_id_name_lower_key
+    ON labels (user_id, lower(name));
+
+-- DELETE is granted per table, only where users may delete rows (least privilege).
+GRANT DELETE ON labels TO :"app_user";
