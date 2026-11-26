@@ -9,10 +9,13 @@ import type { AuthenticatedUser } from '@shared/auth/authenticated-request.js';
 import { CurrentUser } from '@shared/auth/current-user.decorator.js';
 import { GetCashFlowUseCase } from '../application/get-cash-flow.use-case.js';
 import { GetNetWorthUseCase } from '../application/get-net-worth.use-case.js';
+import { GetSpendingByLabelUseCase } from '../application/get-spending-by-label.use-case.js';
 import { CashFlowMonthResponseDto } from './cash-flow-month.response.dto.js';
 import { CashFlowQueryDto } from './cash-flow.query.dto.js';
 import { NetWorthResponseDto } from './net-worth.response.dto.js';
 import { toHttpError } from './reports-error.mapper.js';
+import { SpendingByLabelQueryDto } from './spending-by-label.query.dto.js';
+import { SpendingByLabelResponseDto } from './spending-by-label.response.dto.js';
 
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({
@@ -25,6 +28,8 @@ export class ReportsController {
     private readonly getNetWorthUseCase: GetNetWorthUseCase,
     @Inject(GetCashFlowUseCase)
     private readonly getCashFlowUseCase: GetCashFlowUseCase,
+    @Inject(GetSpendingByLabelUseCase)
+    private readonly getSpendingByLabelUseCase: GetSpendingByLabelUseCase,
   ) {}
 
   @ApiOkResponse({ type: NetWorthResponseDto })
@@ -52,6 +57,27 @@ export class ReportsController {
         to: query.to,
       });
       return months;
+    } catch (error) {
+      throw toHttpError(error);
+    }
+  }
+
+  @ApiOkResponse({ type: SpendingByLabelResponseDto })
+  @ApiBadRequestResponse({
+    description:
+      'month missing or not a real YYYY-MM month, or unexpected parameters',
+  })
+  @Get('spending-by-label')
+  async spendingByLabel(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: SpendingByLabelQueryDto,
+  ): Promise<SpendingByLabelResponseDto> {
+    try {
+      const spending = await this.getSpendingByLabelUseCase.execute({
+        userId: user.id,
+        month: query.month,
+      });
+      return spending;
     } catch (error) {
       throw toHttpError(error);
     }
